@@ -1,6 +1,6 @@
 # Sensor window format (C++ capture → Python shipper)
 
-Local to earendil only. Raw IPs and MACs live here and never leave the box.
+Local to the sensor host only. Raw IPs and MACs live here and never leave the box.
 
 The capture binary writes one file per 10 s window to `$SENTINEL_WINDOWS_DIR` (default `/var/lib/sentinel/windows/`). Each file is written as `<window_start>.ndjson.tmp` and renamed to `<window_start>.ndjson` when complete, so the shipper only ever reads finished files. One JSON object per line, one line per local host seen in that window.
 

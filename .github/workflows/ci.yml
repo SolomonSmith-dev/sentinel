@@ -71,5 +71,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        if: hashFiles('deploy-earendil.sh') != ''
-        run: shellcheck deploy-earendil.sh
+        if: hashFiles('deploy-sensor.sh') != ''
+        run: shellcheck deploy-sensor.sh

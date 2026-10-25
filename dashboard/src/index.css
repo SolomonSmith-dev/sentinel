@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* surfaces */
+  --color-bg: #0a0c0f;
+  --color-panel: #12151a;
+  --color-raised: #181c22;
+  --color-line: #232830;
+  --color-line-strong: #2f3540;
+
+  /* ink (text tokens; text never wears series colors) */
+  --color-ink: #eceef1;
+  --color-ink-2: #b4bac4;
+  --color-ink-3: #8a919c;
+
+  /* brand accent: the "live" phosphor */
+  --color-live: #5ce1a6;
+
+  /* series (dataviz reference palette, dark steps) */
+  --color-series-in: #3987e5;
+  --color-series-out: #d95926;
+
+  /* status (fixed; always paired with a label) */
+  --color-sev-low: #8a919c;
+  --color-sev-medium: #fab219;
+  --color-sev-high: #ec835a;
+  --color-sev-critical: #d03b3b;
+  --color-good: #0ca30c;
+
+  /* seed / demo badge: calm, cool, not a status color */
+  --color-seed: #9db8e8;
+}
+
+@layer base {
+  html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body {
+    background-color: var(--color-bg);
+    background-image:
+      radial-gradient(1200px 500px at 10% -10%, rgb(92 225 166 / 0.06), transparent 60%),
+      radial-gradient(900px 400px at 100% 0%, rgb(57 135 229 / 0.07), transparent 60%),
+      linear-gradient(rgb(255 255 255 / 0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.018) 1px, transparent 1px);
+    background-size: auto, auto, 32px 32px, 32px 32px;
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  :focus-visible { outline: 2px solid var(--color-live); outline-offset: 2px; border-radius: 4px; }
+  .tnum { font-variant-numeric: tabular-nums; }
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(92 225 166 / 0.55); }
+  70% { box-shadow: 0 0 0 7px rgb(92 225 166 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(92 225 166 / 0); }
+}
+.live-dot { animation: pulse-ring 2.4s ease-out infinite; }
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--color-raised); border-radius: 6px; }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.05), transparent);
+  animation: shimmer 1.6s infinite;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise 0.5s cubic-bezier(0.2, 0, 0, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .skeleton::after, .rise { animation: none; }
+}
+
+.recharts-wrapper:focus, .recharts-surface:focus { outline: none; }
+.recharts-wrapper:focus-visible { outline: 2px solid var(--color-live); outline-offset: 4px; }
