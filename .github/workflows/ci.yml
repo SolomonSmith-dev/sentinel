@@ -1,0 +1,75 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: hashFiles('api/package.json') != ''
+        with:
+          node-version: 22
+      - name: test
+        if: hashFiles('api/package.json') != ''
+        working-directory: api
+        run: npm ci && npm run typecheck && npm test
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: hashFiles('dashboard/package.json') != ''
+        with:
+          node-version: 22
+      - name: build
+        if: hashFiles('dashboard/package.json') != ''
+        working-directory: dashboard
+        run: npm ci && npm run build
+
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build and replay pcaps
+        if: hashFiles('sensor/capture/CMakeLists.txt') != ''
+        run: |
+          sudo apt-get update && sudo apt-get install -y libpcap-dev cmake
+          cmake -S sensor/capture -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
+  shipper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: hashFiles('sensor/shipper/pyproject.toml') != ''
+        with:
+          python-version: "3.12"
+      - name: test
+        if: hashFiles('sensor/shipper/pyproject.toml') != ''
+        working-directory: sensor/shipper
+        run: pip install -e '.[dev]' && pytest -q
+
+  deploy-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        if: hashFiles('deploy-earendil.sh') != ''
+        run: shellcheck deploy-earendil.sh

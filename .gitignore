@@ -1,0 +1,15 @@
+.env
+.dev.vars
+node_modules/
+dist/
+build/
+.wrangler/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.joblib
+.claude/
+.playwright-mcp/
+graphify-out/
+.DS_Store
