@@ -209,3 +209,30 @@ TEST_CASE("bad IP headers are rejected") {
     wrong_version[14] = 0x40;
     CHECK_FALSE(parse_ethernet(wrong_version.data(), wrong_version.size()));
 }
+
+TEST_CASE("TCP truncated after the flags byte still counts a SYN") {
+    auto frame =
+        FrameBuilder().ethernet(kIpv4).ipv4("192.168.1.2", "203.0.113.1", 6).tcp(1, 2, flag::kSyn).bytes();
+    frame.resize(14 + 20 + 14);  // flags byte (offset 13) present, header incomplete
+    const auto pkt = parse_ethernet(frame.data(), frame.size());
+    REQUIRE(pkt);
+    CHECK_FALSE(pkt->has_ports);
+    CHECK(pkt->is_syn());
+    frame.resize(14 + 20 + 13);  // flags byte cut off
+    const auto cut = parse_ethernet(frame.data(), frame.size());
+    REQUIRE(cut);
+    CHECK_FALSE(cut->is_syn());
+}
+
+TEST_CASE("three or more VLAN tags are walked, not dropped") {
+    const auto frame = FrameBuilder()
+                           .ethernet(kIpv4, {kDot1ad, kDot1Q, kDot1Q})
+                           .ipv4("192.168.1.12", "203.0.113.102", 6)
+                           .tcp(50002, 443, flag::kSyn)
+                           .bytes();
+    const auto pkt = parse_ethernet(frame.data(), frame.size());
+    REQUIRE(pkt);
+    CHECK(pkt->src_ip.to_string() == "192.168.1.12");
+    CHECK(pkt->dst_port == 443);
+    CHECK(pkt->is_syn());
+}

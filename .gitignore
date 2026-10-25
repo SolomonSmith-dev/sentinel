@@ -13,3 +13,4 @@ __pycache__/
 .playwright-mcp/
 graphify-out/
 .DS_Store
+*.egg-info/

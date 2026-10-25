@@ -146,3 +146,46 @@ TEST_CASE("window_of floors to 10 s boundaries") {
     CHECK(window_of(1761370760) == 1761370760);
     CHECK(window_of(-1) == -10);
 }
+
+TEST_CASE("a group source MAC is still attributed to the source IP") {
+    WindowAggregator agg;
+    auto p = packet("192.168.1.10", "203.0.113.5", 0x0A, 0x05, Transport::Tcp, 40000, 443);
+    p.src_mac.bytes = {0x01, 0x00, 0x5E, 0x00, 0x00, 0x01};
+    agg.add(p, 60);
+    REQUIRE(agg.host_count() == 1);
+    CHECK(agg.hosts().begin()->first == p.src_mac);
+    CHECK(agg.hosts().begin()->second.pkts_out == 1);
+}
+
+TEST_CASE("state caps bound hosts and peers, and count the overflow") {
+    sentinel::StateLimits state;
+    state.max_hosts = 2;
+    state.max_dests_per_host = 2;
+    state.max_ports_per_peer = 2;
+    WindowAggregator agg({}, state);
+
+    for (int i = 1; i <= 4; ++i) {  // 4 spoofed MACs, 2 fit
+        agg.add(packet("192.168.1.10", "203.0.113.5", static_cast<std::uint8_t>(i), 0x05,
+                       Transport::Tcp, 40000, 443),
+                60);
+    }
+    CHECK(agg.host_count() == 2);
+    CHECK(agg.overflow_hosts() == 2);
+
+    for (int d = 1; d <= 4; ++d) {  // host 1 sends to 4 dests, 2 fit
+        const std::string dst = "203.0.113." + std::to_string(d);
+        agg.add(packet("192.168.1.10", dst.c_str(), 0x01, 0x05, Transport::Tcp, 40000, 443), 60);
+    }
+    CHECK(agg.overflow_peers() >= 2);
+    for (std::uint16_t port = 1; port <= 5; ++port) {
+        agg.add(packet("192.168.1.10", "203.0.113.1", 0x01, 0x05, Transport::Tcp, 40000, port), 60);
+    }
+    const auto out = lines(agg.to_ndjson(0, 10, "pcap"));
+    for (const auto& line : out) {
+        CHECK(line["distinct_dests"] <= 2);
+        for (const auto& d : line["dests"]) CHECK(d["ports"].size() <= 2);
+    }
+    agg.clear();
+    CHECK(agg.overflow_hosts() == 0);
+    CHECK(agg.overflow_peers() == 0);
+}

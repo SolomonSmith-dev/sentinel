@@ -19,6 +19,19 @@ struct OutputLimits {
     std::size_t max_inbound_sources = 64;
 };
 
+// Memory caps for state held during one window. A LAN attacker spoofing source
+// MACs or addresses could otherwise grow it without limit. Once a cap is hit,
+// new entries are counted in the overflow counters instead of stored; existing
+// entries keep updating. Distinct counts are exact up to these caps and a lower
+// bound beyond them.
+struct StateLimits {
+    std::size_t max_hosts = 4096;               // 8 KiB port bitset each
+    std::size_t max_dests_per_host = 1024;
+    std::size_t max_inbound_per_host = 1024;
+    std::size_t max_ports_per_peer = 256;       // stored ports per dest / inbound source
+    std::size_t max_peer_entries = 262144;      // dests + inbound across all hosts
+};
+
 struct DestStats {
     std::uint64_t pkts = 0;
     std::uint64_t bytes = 0;
@@ -47,7 +60,8 @@ struct HostStats {
 
 class WindowAggregator {
 public:
-    explicit WindowAggregator(OutputLimits limits = {}) : limits_(limits) {}
+    explicit WindowAggregator(OutputLimits limits = {}, StateLimits state = {})
+        : limits_(limits), state_(state) {}
 
     // Attributes one packet to the local host(s) on either side. Packets with
     // no local side are ignored. `wire_len` is pcap_pkthdr.len.
@@ -61,15 +75,26 @@ public:
 
     std::size_t host_count() const { return hosts_.size(); }
     std::uint64_t packet_count() const { return packets_; }
+    // Hosts dropped because the host table was full, and peer entries (dests,
+    // inbound sources) dropped because a per-host or window-wide cap was hit.
+    std::uint64_t overflow_hosts() const { return overflow_hosts_; }
+    std::uint64_t overflow_peers() const { return overflow_peers_; }
     const std::unordered_map<MacAddress, HostStats>& hosts() const { return hosts_; }
 
 private:
     void add_outbound(const PacketInfo& pkt, std::uint32_t wire_len);
     void add_inbound(const PacketInfo& pkt, std::uint32_t wire_len);
 
+    // Returns the host for `mac`, or nullptr (and counts it) if the table is full.
+    HostStats* host_for(const MacAddress& mac);
+
     OutputLimits limits_;
+    StateLimits state_;
     std::unordered_map<MacAddress, HostStats> hosts_;
     std::uint64_t packets_ = 0;
+    std::uint64_t peer_entries_ = 0;
+    std::uint64_t overflow_hosts_ = 0;
+    std::uint64_t overflow_peers_ = 0;
 };
 
 }  // namespace sentinel

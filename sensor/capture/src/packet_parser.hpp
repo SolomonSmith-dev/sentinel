@@ -2,7 +2,8 @@
 //
 // The parser never reads past `caplen`. Frames whose network header is cut off
 // are rejected; frames whose transport header is cut off are still returned
-// (they count toward packets and bytes) but carry no ports or flags.
+// (they count toward packets and bytes) but carry no ports; TCP flags are kept
+// if their byte was captured.
 #pragma once
 
 #include <cstddef>

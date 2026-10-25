@@ -12,14 +12,14 @@ const CLOCK_SKEW_S = 300;
 const IDEMPOTENCY_TTL_S = 86_400;
 
 // Privacy guard (docs/api.md). IPv4 and MAC patterns are verbatim from the contract.
-const IPV4_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
-const MAC_RE = /\b[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}\b/;
+const IPV4_RE = /(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)/;
+const MAC_RE = /(?<![0-9a-fA-F])[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}(?![0-9a-fA-F])/;
 // IPv6-looking tokens: 3+ colon-separated hex groups, or any token using "::" compression.
 const IPV6_RE = new RegExp(
   [
-    String.raw`(?<![0-9A-Za-z:])(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}(?![0-9A-Za-z:])`,
-    String.raw`(?<![0-9A-Za-z:])(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?(?![0-9A-Za-z])`,
-    String.raw`(?<![0-9A-Za-z:])::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?![0-9A-Za-z])`,
+    String.raw`(?<![0-9a-fA-F:])(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}(?![0-9a-fA-F:])`,
+    String.raw`(?<![0-9a-fA-F:])(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?(?![0-9a-fA-F])`,
+    String.raw`(?<![0-9a-fA-F:])::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?![0-9a-fA-F])`,
   ].join("|"),
 );
 
@@ -210,6 +210,10 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
     if (len("windows") > MAX_WINDOWS || len("alerts") > MAX_ALERTS || len("devices") > MAX_DEVICES) {
       return fail(400, "too_many_items", `At most ${MAX_WINDOWS} windows, ${MAX_ALERTS} alerts, ${MAX_DEVICES} devices per batch`);
     }
+  }
+  // JSON escapes (\u0031...) hide addresses from the raw-text check; re-check decoded text.
+  if (containsPii(JSON.stringify(json))) {
+    return fail(400, "pii_rejected", "Body contains an IP or MAC address");
   }
   const parsed = BatchSchema.safeParse(json);
   if (!parsed.success) {

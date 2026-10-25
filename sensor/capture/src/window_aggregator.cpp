@@ -5,6 +5,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "log.hpp"
+
 namespace sentinel {
 namespace {
 
@@ -47,7 +49,12 @@ std::vector<std::pair<IpAddress, const Stats*>> top_by_pkts(
 }  // namespace
 
 void WindowAggregator::add(const PacketInfo& pkt, std::uint32_t wire_len) {
-    const bool src_local = pkt.src_ip.is_local() && !is_group_mac(pkt.src_mac);
+    // A group source MAC is invalid on Ethernet, but exempting it would let a
+    // spoofer escape attribution, so the source side is attributed regardless.
+    const bool src_local = pkt.src_ip.is_local();
+    if (src_local && is_group_mac(pkt.src_mac)) {
+        log::debug("group source MAC " + pkt.src_mac.to_string() + " attributed to its source IP");
+    }
     const bool dst_local = pkt.dst_ip.is_local() && !is_group_mac(pkt.dst_mac);
     if (!src_local && !dst_local) return;
 
@@ -57,36 +64,71 @@ void WindowAggregator::add(const PacketInfo& pkt, std::uint32_t wire_len) {
     if (dst_local) add_inbound(pkt, wire_len);
 }
 
+HostStats* WindowAggregator::host_for(const MacAddress& mac) {
+    if (const auto it = hosts_.find(mac); it != hosts_.end()) return &it->second;
+    if (hosts_.size() >= state_.max_hosts) {
+        ++overflow_hosts_;
+        return nullptr;
+    }
+    return &hosts_[mac];
+}
+
 void WindowAggregator::add_outbound(const PacketInfo& pkt, std::uint32_t wire_len) {
-    HostStats& host = hosts_[pkt.src_mac];
+    HostStats* host_ptr = host_for(pkt.src_mac);
+    if (!host_ptr) return;
+    HostStats& host = *host_ptr;
     host.ip = pkt.src_ip;
     ++host.pkts_out;
     host.bytes_out += wire_len;
+    if (pkt.is_syn()) ++host.syn_out;
+    if (pkt.has_ports) host.ports_out.set(pkt.dst_port);
 
-    DestStats& dest = host.dests[pkt.dst_ip];
+    auto it = host.dests.find(pkt.dst_ip);
+    if (it == host.dests.end()) {
+        if (host.dests.size() >= state_.max_dests_per_host ||
+            peer_entries_ >= state_.max_peer_entries) {
+            ++overflow_peers_;
+            return;
+        }
+        ++peer_entries_;
+        it = host.dests.emplace(pkt.dst_ip, DestStats{}).first;
+    }
+    DestStats& dest = it->second;
     ++dest.pkts;
     dest.bytes += wire_len;
-    if (pkt.is_syn()) {
-        ++host.syn_out;
-        ++dest.syn;
-    }
-    if (pkt.has_ports) {
-        host.ports_out.set(pkt.dst_port);
+    if (pkt.is_syn()) ++dest.syn;
+    if (pkt.has_ports && (dest.ports.size() < state_.max_ports_per_peer ||
+                          dest.ports.count(pkt.dst_port))) {
         dest.ports.insert(pkt.dst_port);
     }
 }
 
 void WindowAggregator::add_inbound(const PacketInfo& pkt, std::uint32_t wire_len) {
-    HostStats& host = hosts_[pkt.dst_mac];
+    HostStats* host_ptr = host_for(pkt.dst_mac);
+    if (!host_ptr) return;
+    HostStats& host = *host_ptr;
     host.ip = pkt.dst_ip;
     ++host.pkts_in;
     host.bytes_in += wire_len;
     if (pkt.is_synack()) ++host.synack_in;
 
-    InboundStats& source = host.inbound[pkt.src_ip];
+    auto it = host.inbound.find(pkt.src_ip);
+    if (it == host.inbound.end()) {
+        if (host.inbound.size() >= state_.max_inbound_per_host ||
+            peer_entries_ >= state_.max_peer_entries) {
+            ++overflow_peers_;
+            return;
+        }
+        ++peer_entries_;
+        it = host.inbound.emplace(pkt.src_ip, InboundStats{}).first;
+    }
+    InboundStats& source = it->second;
     ++source.pkts;
     if (pkt.is_syn()) ++source.syn;
-    if (pkt.has_ports) source.ports.insert(pkt.dst_port);
+    if (pkt.has_ports && (source.ports.size() < state_.max_ports_per_peer ||
+                          source.ports.count(pkt.dst_port))) {
+        source.ports.insert(pkt.dst_port);
+    }
 }
 
 std::string WindowAggregator::to_ndjson(std::int64_t window_start, int window_s,
@@ -144,6 +186,9 @@ std::string WindowAggregator::to_ndjson(std::int64_t window_start, int window_s,
 void WindowAggregator::clear() {
     hosts_.clear();
     packets_ = 0;
+    peer_entries_ = 0;
+    overflow_hosts_ = 0;
+    overflow_peers_ = 0;
 }
 
 }  // namespace sentinel

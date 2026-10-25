@@ -77,6 +77,23 @@ describe("POST /api/ingest", () => {
     expect(containsPii(JSON.stringify(sampleBatch()))).toBe(false);
   });
 
+  it("pii_rejected for JSON-escaped addresses", async () => {
+    const base = JSON.stringify(sampleBatch({ devices: [{ device_hash: "dev-3fa91c", vendor: "VENDOR", first_seen: 1 }] }));
+    for (const leak of ["\\u0031\\u0039\\u0032.168.1.20", "a4\\u003a83:e7:12:34:56"]) {
+      const res = await postIngest(base.replace("VENDOR", leak));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+    }
+  });
+
+  it("privacy guard catches letter-adjacent addresses, spares uuids and signatures", () => {
+    expect(containsPii('{"x":"x10.0.0.1y"}')).toBe(true);
+    expect(containsPii('{"x":"zza4:83:e7:12:34:56q"}')).toBe(true);
+    expect(containsPii('{"x":"xfe80::1y"}')).toBe(true);
+    expect(containsPii('{"id":"123e4567-e89b-42d3-a456-426614174000","score":0.03,"cc":"US","d":"dev-5e0a11"}')).toBe(false);
+    expect(containsPii('{"signature":"ET SCAN Possible Nmap User-Agent Observed","sid":2024364}')).toBe(false);
+  });
+
   it("too_many_items", async () => {
     const w = sampleBatch().windows[0]!;
     const windows = Array.from({ length: 501 }, (_, i) => ({ ...w, ts: w.ts - i * 60 }));

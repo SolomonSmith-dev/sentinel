@@ -42,6 +42,11 @@ void WindowClock::flush() {
     log::info("window " + std::to_string(start) + " hosts=" +
               std::to_string(aggregator_.host_count()) +
               " packets=" + std::to_string(aggregator_.packet_count()));
+    if (aggregator_.overflow_hosts() > 0 || aggregator_.overflow_peers() > 0) {
+        log::warn("window " + std::to_string(start) + " state caps hit: dropped_host_packets=" +
+                  std::to_string(aggregator_.overflow_hosts()) +
+                  " dropped_peer_entries=" + std::to_string(aggregator_.overflow_peers()));
+    }
     aggregator_.clear();
     current_.reset();
 }

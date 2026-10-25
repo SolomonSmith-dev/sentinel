@@ -9,7 +9,6 @@ constexpr std::uint16_t kEtherTypeIpv4 = 0x0800;
 constexpr std::uint16_t kEtherTypeIpv6 = 0x86DD;
 constexpr std::uint16_t kEtherTypeVlan = 0x8100;   // 802.1Q
 constexpr std::uint16_t kEtherTypeQinQ = 0x88A8;   // 802.1ad outer tag
-constexpr int kMaxVlanTags = 2;
 
 constexpr std::uint8_t kProtoTcp = 6;
 constexpr std::uint8_t kProtoUdp = 17;
@@ -54,7 +53,11 @@ void parse_transport(const ByteCursor& cur, std::size_t offset, std::uint8_t pro
                      PacketInfo& pkt) {
     if (proto == kProtoTcp) {
         pkt.transport = Transport::Tcp;
-        if (!cur.has(offset, kTcpMinHeaderLen)) return;
+        if (!cur.has(offset, kTcpMinHeaderLen)) {
+            // Flags sit at byte 13: keep SYN accounting if that byte was captured.
+            if (cur.has(offset + 13, 1)) pkt.tcp_flags = cur.u8(offset + 13);
+            return;
+        }
         pkt.src_port = cur.u16(offset);
         pkt.dst_port = cur.u16(offset + 2);
         pkt.tcp_flags = cur.u8(offset + 13);
@@ -149,9 +152,9 @@ std::optional<PacketInfo> parse_ethernet(const std::uint8_t* data, std::size_t c
 
     std::size_t offset = 12;
     std::uint16_t ether_type = cur.u16(offset);
-    for (int tags = 0; (ether_type == kEtherTypeVlan || ether_type == kEtherTypeQinQ) &&
-                       tags < kMaxVlanTags;
-         ++tags) {
+    // Tags are walked as deep as the capture allows (at most caplen / 4 steps),
+    // so stacking tags cannot hide a packet from attribution.
+    while (ether_type == kEtherTypeVlan || ether_type == kEtherTypeQinQ) {
         offset += kVlanTagLen;
         if (!cur.has(offset, 2)) return std::nullopt;
         ether_type = cur.u16(offset);
