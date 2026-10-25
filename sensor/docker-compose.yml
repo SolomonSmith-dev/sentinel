@@ -1,0 +1,100 @@
+# Sentinel sensor stack for the sensor host (home-server: 2-core Core 2 Duo,
+# 7.5 GiB RAM, Debian 12, shared with other Docker stacks and Pi-hole).
+#
+# Run from the repo root (this is what deploy-sensor.sh does):
+#   docker compose -f sensor/docker-compose.yml --env-file .env up -d --build
+#
+# Data flow, all local until the shipper's HTTPS POST:
+#   suricata          -> eve.json (alerts only)  -> volume suricata-logs
+#   sentinel-capture  -> 10 s ndjson windows      -> volume sentinel-windows
+#   sentinel-shipper  reads both, anonymizes, scores, ships 60 s batches.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # One-shot: make the shared volumes writable by the shipper (uid 10001), which
+  # must delete processed window files written by the root capture process.
+  sentinel-init:
+    image: busybox:1.37.0
+    command: ["sh", "-c", "chown 10001:10001 /w /s && chmod 0775 /w"]
+    volumes:
+      - sentinel-windows:/w
+      - sentinel-state:/s
+    restart: "no"
+    logging: *logging
+
+  suricata:
+    image: jasonish/suricata:8.0.7
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
+    cpus: "1.0"
+    mem_limit: 1g
+    environment:
+      # Run Suricata as uid/gid 10001 so the shipper (same ids) can read eve.json.
+      PUID: "10001"
+      PGID: "10001"
+    # Fetch ET Open with suricata-update on every start (cached in the
+    # suricata-rules volume, so a failed download reuses the last good set),
+    # then run on the LAN interface in af-packet mode with our overrides.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        /docker-entrypoint.sh suricata-update --no-test -q
+        || echo "suricata-update failed; using cached rules";
+        exec /docker-entrypoint.sh --af-packet=${SENTINEL_IFACE:-eth0}
+        --include /etc/suricata/sentinel.yaml
+    volumes:
+      - ./suricata/sentinel.yaml:/etc/suricata/sentinel.yaml:ro
+      - suricata-logs:/var/log/suricata
+      - suricata-rules:/var/lib/suricata
+    restart: unless-stopped
+    logging: *logging
+
+  sentinel-capture:
+    build:
+      context: ../sensor/capture
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    cpus: "0.5"
+    environment:
+      SENTINEL_IFACE: ${SENTINEL_IFACE:-eth0}
+      SENTINEL_WINDOWS_DIR: /var/lib/sentinel/windows
+    volumes:
+      - sentinel-windows:/var/lib/sentinel/windows
+    depends_on:
+      sentinel-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging: *logging
+
+  sentinel-shipper:
+    build:
+      context: ./shipper
+    env_file:
+      - ../.env
+    cpus: "0.5"
+    environment:
+      SENTINEL_WINDOWS_DIR: /var/lib/sentinel/windows
+      SENTINEL_STATE_DIR: /var/lib/sentinel/state
+      SENTINEL_EVE: /var/log/suricata/eve.json
+      # Nightly retrain runs at 03:30 in this zone.
+      TZ: ${TZ:-America/Los_Angeles}
+    volumes:
+      - sentinel-windows:/var/lib/sentinel/windows
+      - sentinel-state:/var/lib/sentinel/state
+      - suricata-logs:/var/log/suricata:ro
+    depends_on:
+      sentinel-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  sentinel-windows:
+  sentinel-state:
+  suricata-logs:
+  suricata-rules:

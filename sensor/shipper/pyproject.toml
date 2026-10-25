@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-shipper"
+version = "0.1.0"
+description = "Sentinel sensor shipper: anonymize, score, rule-check and ship LAN traffic windows."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# numpy is held at 2.3.x on purpose: numpy 2.4 raised the x86 wheel baseline to
+# x86-64-v2 (SSE4.2/POPCNT), which the sensor host's Core 2 Duo does not have.
+dependencies = [
+    "httpx==0.28.1",
+    "joblib==1.6.0",
+    "numpy==2.3.5",
+    "scikit-learn==1.9.1",
+    "scipy==1.18.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "respx==0.23.1",
+]
+
+[project.scripts]
+sentinel-shipper = "sentinel_shipper.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

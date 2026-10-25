@@ -1,0 +1,44 @@
+%YAML 1.1
+---
+# Sentinel overrides, loaded on top of the image's stock suricata.yaml with
+# `--include`. Goal: alerts only, as small a footprint as the sensor host allows.
+# The shipper reads eve.json and forwards only signature/sid/category.
+
+stats:
+  enabled: no
+
+outputs:
+  - fast:
+      enabled: no
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            tagged-packets: no
+  - http-log:
+      enabled: no
+  - tls-log:
+      enabled: no
+  - tls-store:
+      enabled: no
+  - pcap-log:
+      enabled: no
+  - alert-debug:
+      enabled: no
+  - stats:
+      enabled: no
+  - file-store:
+      enabled: no
+
+# One capture thread: the sensor host is a 2-core Core 2 Duo shared with other stacks.
+af-packet:
+  - interface: default
+    threads: 1
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+
+threading:
+  set-cpu-affinity: no
