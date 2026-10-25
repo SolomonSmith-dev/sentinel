@@ -34,3 +34,8 @@ Rules
 - Bytes are the captured packet's wire length (`pkthdr.len`).
 
 Replay mode: `sentinel-capture --pcap <file> --out <dir>` reads a pcap file, uses packet timestamps for windowing, flushes the final partial window, and exits 0.
+
+Clarifications (from the capture build)
+- Frames addressed to broadcast or multicast MACs never create a receiving host.
+- In replay mode `iface` is `"pcap"` unless `--iface` is given.
+- Live mode writes an empty window file as a heartbeat when nothing was seen, and writes nothing while the capture handle is down.
