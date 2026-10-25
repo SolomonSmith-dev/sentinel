@@ -8,14 +8,19 @@ from __future__ import annotations
 
 import re
 
-IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-MAC = re.compile(r"\b[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}\b")
-# "IPv6-looking": three or more colon-separated hex groups, or anything with "::".
-# Our JSON is compact (separators ",", ":"), so a key/value pair never produces
-# two colons separated only by hex digits.
+# Ported verbatim from the Worker (api/src/ingest.ts) so both sides classify every string the
+# same way. Digits are spelled [0-9] because JS \d is ASCII-only while Python's is Unicode.
+# Shared test vectors: api/test/pii-vectors.json (run by pytest and vitest).
+IPV4 = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
+MAC = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}(?![0-9a-fA-F])")
 IPV6 = re.compile(
-    r"(?<![0-9A-Za-z_:])(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}(?![0-9A-Za-z_:])"
-    r"|(?<![0-9A-Za-z_:])(?:[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*)?(?![0-9A-Za-z_])"
+    "|".join(
+        [
+            r"(?<![0-9a-fA-F:])(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}(?![0-9a-fA-F:])",
+            r"(?<![0-9a-fA-F:])(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6})?(?![0-9a-fA-F])",
+            r"(?<![0-9a-fA-F:])::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?![0-9a-fA-F])",
+        ]
+    )
 )
 
 PATTERNS: dict[str, re.Pattern[str]] = {"ipv4": IPV4, "mac": MAC, "ipv6": IPV6}
@@ -44,6 +49,11 @@ def check(body: bytes | str, wan_ip: str | None = None) -> None:
 
 def redact(text: str) -> str:
     """Scrub address-looking substrings from free text (e.g. Suricata signatures)."""
-    for pattern in (MAC, IPV6, IPV4):
-        text = pattern.sub("[redacted]", text)
+    # Repeat until stable: removing one match can expose another (e.g. "1.2.3.4.5.6.7.8").
+    for _ in range(8):
+        before = text
+        for pattern in (MAC, IPV6, IPV4):
+            text = pattern.sub("[redacted]", text)
+        if text == before:
+            break
     return text

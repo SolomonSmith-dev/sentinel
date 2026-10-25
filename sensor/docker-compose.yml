@@ -59,6 +59,7 @@ services:
       context: ../sensor/capture
     network_mode: host
     cap_add: [NET_RAW, NET_ADMIN]
+    security_opt: [no-new-privileges:true]
     cpus: "0.5"
     environment:
       SENTINEL_IFACE: ${SENTINEL_IFACE:-eth0}
@@ -74,8 +75,14 @@ services:
   sentinel-shipper:
     build:
       context: ./shipper
+    # required: false lets `docker compose config` pass on a fresh checkout (Compose 2.24+).
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp
     cpus: "0.5"
     environment:
       SENTINEL_WINDOWS_DIR: /var/lib/sentinel/windows

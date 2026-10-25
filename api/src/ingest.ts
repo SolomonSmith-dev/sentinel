@@ -10,6 +10,7 @@ export const MAX_ALERTS = 500;
 export const MAX_DEVICES = 200;
 const CLOCK_SKEW_S = 300;
 const IDEMPOTENCY_TTL_S = 86_400;
+export const MAX_TS_AGE_S = 8 * 86_400;
 
 // Privacy guard (docs/api.md). IPv4 and MAC patterns are verbatim from the contract.
 const IPV4_RE = /(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)/;
@@ -82,7 +83,33 @@ interface Attempt {
   counts: { windows: number; alerts: number; devices: number };
 }
 
-function logAttempt(env: Env, ctx: ExecutionContext, a: Attempt, status: number, error?: string): void {
+/**
+ * Unauthenticated failures (401, 429, 503 kill switch, pre-auth 413) write at most one ingest_log
+ * row per status per minute, so junk traffic cannot burn the D1 write budget. The Workers Cache API
+ * holds the throttle marker; it is best effort (not atomic), which is fine for a sampled log.
+ * Consequence for /api/metrics: failed_24h 401/429/503-disabled counts are SAMPLED per minute
+ * (at most 1 per minute each), not exact. Every attempt is still console.log'd (Workers Logs).
+ */
+async function unauthLogAllowed(status: number, t: number): Promise<boolean> {
+  try {
+    const cache = (caches as unknown as { default: Cache }).default;
+    const key = new Request(`https://sentinel.internal/_throttle/ingest-log/${status}/${Math.floor(t / 60)}`);
+    if (await cache.match(key)) return false;
+    await cache.put(key, new Response("1", { headers: { "cache-control": "max-age=120" } }));
+  } catch {
+    // Cache unavailable: fall through and allow one row rather than losing the log.
+  }
+  return true;
+}
+
+async function logAttempt(
+  env: Env,
+  ctx: ExecutionContext,
+  a: Attempt,
+  status: number,
+  error?: string,
+  authed = true,
+): Promise<void> {
   const ms = Date.now() - a.started;
   console.log(
     JSON.stringify({
@@ -98,6 +125,7 @@ function logAttempt(env: Env, ctx: ExecutionContext, a: Attempt, status: number,
       ms,
     }),
   );
+  if (!authed && !(await unauthLogAllowed(status, a.receivedAt))) return;
   ctx.waitUntil(
     env.DB.prepare(
       "INSERT INTO ingest_log (request_id, status, ms, bytes, sensor_id, queue_depth, is_seed, received_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
@@ -129,8 +157,9 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
     queueDepth: null,
     counts: { windows: 0, alerts: 0, devices: 0 },
   };
-  const fail = (status: number, code: string, message: string, headers?: Record<string, string>) => {
-    logAttempt(env, ctx, a, status, code);
+  let authed = false;
+  const fail = async (status: number, code: string, message: string, headers?: Record<string, string>) => {
+    await logAttempt(env, ctx, a, status, code, authed);
     return errorResponse(status, code, message, { "x-request-id": a.requestId, ...headers });
   };
 
@@ -149,6 +178,7 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
   if (!expected || !presented || !(await timingSafeEqualStr(presented, expected))) {
     return fail(401, "unauthorized", "Missing or invalid bearer token");
   }
+  authed = true;
 
   // 4. Raw size cap, before reading the body.
   const declared = Number(req.headers.get("content-length") ?? "NaN");
@@ -221,6 +251,10 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
     return fail(400, "invalid_body", issue ? `${issue.path.join(".")}: ${issue.message}` : "Invalid body");
   }
   const batch = parsed.data;
+  const oldest = a.receivedAt - MAX_TS_AGE_S;
+  if (batch.windows.some((w) => w.ts < oldest) || batch.alerts.some((x) => x.ts < oldest)) {
+    return fail(400, "invalid_body", "windows.ts / alerts.ts: older than 8 days");
+  }
   a.sensorId = batch.sensor_id;
   a.queueDepth = batch.queue_depth;
   a.counts = { windows: batch.windows.length, alerts: batch.alerts.length, devices: batch.devices.length };
@@ -231,7 +265,7 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
       .bind(key, a.receivedAt - IDEMPOTENCY_TTL_S)
       .first<{ hit: number }>();
     if (seen) {
-      logAttempt(env, ctx, a, 200, "duplicate");
+      await logAttempt(env, ctx, a, 200, "duplicate");
       return Response.json({ status: "duplicate", request_id: a.requestId }, { headers: { "x-request-id": a.requestId } });
     }
     await env.DB.batch(buildWrites(env.DB, batch, key, a.receivedAt));
@@ -240,7 +274,7 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
     return fail(503, "storage_unavailable", "Storage write failed; retry later", { "retry-after": "30" });
   }
 
-  logAttempt(env, ctx, a, 200);
+  await logAttempt(env, ctx, a, 200);
   return Response.json(
     { status: "ok", ...a.counts, request_id: a.requestId },
     { headers: { "x-request-id": a.requestId } },

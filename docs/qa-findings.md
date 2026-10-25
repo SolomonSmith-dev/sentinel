@@ -74,24 +74,28 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 - What is wrong: `fail()` writes an `ingest_log` row for 401, 413, 429 and 503. Rate-limit and auth failures happen before any trust is established, so anyone can make the Worker write to D1. The limiter caps successful processing, not logging: 429 responses are logged too, so a single IP has no write cap at all, and many IPs each get 60 per minute. docs/api.md says each index entry counts as a row written, so each logged request costs about 3 row-writes (table plus two indexes). By that accounting about 33k junk requests exhaust the 100k/day free-tier write budget, after which real ingest returns 503 storage_unavailable and the seed cron stops. The failure counts shown on the public `/api/metrics` can also be inflated.
 - Proof: against the local Worker, 90 POSTs with no token produced 86 x 401 and 4 x 429, and `ingest_log` grew by exactly 90 rows (61 to 151), 429s included. The 3 row-writes per request and the 33k figure are arithmetic from the contract's own accounting, not measured. Production was not probed.
 - Fix: do not insert into `ingest_log` for failures before auth succeeds (401, 429, 503 disabled). Count them with Workers Logs (already enabled in `wrangler.jsonc`) or log only authenticated attempts. Add a Cloudflare WAF rate-limiting rule on `/api/ingest` for the distributed case.
+- Fixed: unauthenticated 401/429/503-disabled failures write at most one `ingest_log` row per status per minute (Cache API marker, always `console.log`'d); authenticated outcomes still log every row. `/api/metrics` 401/429 counts are now sampled (noted in code). No WAF rule added (not in scope).
 
 ### F2 (Medium): public read endpoints hit D1 on every request, and the cache key accepts arbitrary query strings
 - Where: `api/src/reads.ts:101-147` (`metrics`, with `SELECT COUNT(*) FROM windows` at line 113), `reads.ts:24` (`flows`), `reads.ts:40` (`alerts`), none cached; `cachedJson` at `reads.ts:12-22` keys on the full URL including unknown params.
 - What is wrong: `/api/metrics`, `/api/flows` and `/api/alerts` are unauthenticated, uncached at the edge (the Worker runs first for `/api/*`), and `metrics` scans the whole `windows` table. D1 bills rows scanned. `/api/top` and `/api/devices` are cached, but `?x=<random>` creates a new cache key per request and forces a recompute.
 - Proof: local `windows` has 12,033 rows (seed only), and the `metrics` query counts all of them each call. Against the 5M rows-read/day free tier that is roughly 400 calls on seed data alone, and far fewer once real data accumulates (the contract budgets about 43k rows/day, so about 300k rows after a week, about 16 calls). This is an estimate from measured table size; wrangler local did not report `rows_read`, and production was not tested.
 - Fix: wrap `metrics`, `flows` and `alerts` in `cachedJson`, and build the cache key from an allowlist of known params only. Replace the three `COUNT(*)` scans with a counter maintained by the cron.
+- Fixed: `/api/metrics`, `/api/flows`, `/api/alerts` use `cachedJson` (10 s). Cache key is still the full sorted query string, so `?x=random` can still bust it; the param allowlist and cron-maintained counters from the fix list are not done.
 
 ### F3 (Medium): shipper and Worker privacy regexes disagree; a benign signature quarantines a whole batch
 - Where: `sensor/shipper/src/sentinel_shipper/privacy.py:11-12` (`\b` boundaries) versus `api/src/ingest.ts:15-18` (lookbehind on digits or hex). `redact()` (`privacy.py:45`) uses the shipper's weaker patterns on Suricata signature and category (`eve.py:88,90`).
 - What is wrong: text such as `v2.0.1.3` has no `\b` before the 2, so the shipper neither redacts nor blocks it, but the Worker matches `2.0.1.3` as IPv4 and returns 400 pii_rejected. `sender.py` treats that as unrecoverable and quarantines the entire batch (up to 500 windows and all their alerts). A version number in one ET signature loses a minute or more of telemetry. No address leaks; this is data loss and a silent gap.
 - Proof: a real Worker returned `400 pii_rejected` for an alert with signature "ET TROJAN Foo v2.0.1.3 beacon". `privacy.violations()` on the same string returned `[]`. A Python port of the Worker regexes also diverges on `Foo_1.2.3.4`, `build1.2.3.4`, `g1.2.3.4h`, `sid:1:2:3` and `xa4:83:e7:12:34:56` (port only; those were not sent to the Worker).
 - Fix: use identical patterns on both sides (copy the Worker's lookaround regexes into `privacy.py`) and add a shared fixture of strings both must classify the same way. Also make `redact()` drop the digits of anything the Worker would match.
+- Fixed: `privacy.py` now uses the Worker's lookaround patterns; `redact()` loops until stable. Shared vectors in `api/test/pii-vectors.json` run in pytest and vitest.
 
 ### F4 (Low): `deploy-sensor.sh --dry-run` fails on a fresh checkout
 - Where: `deploy-sensor.sh:45,89` and `sensor/docker-compose.yml:77-78` (`env_file: ../.env`).
 - What is wrong: dry run substitutes `.env.example` for `--env-file`, but the shipper service's `env_file: ../.env` is mandatory, so `docker compose config` fails when `.env` does not exist yet. A dry run cannot validate a fresh host, which is the case it exists for.
 - Proof: ran `bash deploy-sensor.sh --dry-run`; output ended with "env file .../sentinel/.env not found", exit 1. (Run on macOS; the failing line is compose validation, not the interface check.)
 - Fix: use `env_file: [{path: ../.env, required: false}]` (Compose 2.24+), or have dry run create a temp `.env` copy and point compose at it.
+- Fixed: `env_file` uses `path: ../.env, required: false`; `docker compose -f sensor/docker-compose.yml config --quiet` exits 0 with no `.env`.
 
 ### F5 (Low): the 2 KB `detail` cap counts UTF-16 code units, not bytes
 - Where: `api/src/ingest.ts:55` (`JSON.stringify(d).length <= 2048`).
@@ -110,18 +114,21 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 - What is wrong: `ts` can be any past value. `ts = 0` is stored. Nightly prune removes it, but until then it sits in the 7-day tables and skews `first_seen` (devices keep the earliest).
 - Proof: window with `ts: 0` returned 200; D1 row stored with ts 0.
 - Fix: reject or clamp `ts < received_at - 7 days`.
+- Fixed: window or alert `ts` older than 8 days before `received_at` returns 400 `invalid_body`.
 
 ### F8 (Low): no security headers on the dashboard or API
 - Where: `api/wrangler.jsonc` (assets), no `_headers` file under `dashboard/public/`.
 - What is wrong: no CSP, `X-Content-Type-Options`, `Referrer-Policy` or `frame-ancestors`. React escapes all text, so there is no known injection path, but nothing limits damage if one appears.
 - Proof: `curl -I` on the local Worker for `/` and `/api/metrics` showed none of these headers. Production headers were not checked.
 - Fix: add `dashboard/public/_headers` with a CSP (`default-src 'self'`) and the other three.
+- Fixed: Worker adds CSP, nosniff, referrer-policy, X-Frame-Options to every response; `dashboard/public/_headers` covers static assets. Verified with curl -I and a Playwright load (no console errors).
 
 ### F9 (Low): compose hardening not applied
 - Where: `sensor/docker-compose.yml:33,61,77`.
 - What is wrong: `sentinel-capture` adds NET_ADMIN, but the image only grants `cap_net_raw+ep` (`sensor/capture/Dockerfile`) and libpcap capture needs only NET_RAW. No service sets `cap_drop: [ALL]`, `read_only: true` or `security_opt: [no-new-privileges]`. The shipper (the only service that talks to the internet) runs non-root but with default capabilities.
 - Proof: read of the compose file and Dockerfiles only; not exercised at runtime.
 - Fix: drop NET_ADMIN from capture; add `cap_drop: [ALL]` plus `read_only: true` and `no-new-privileges` to the shipper. (Do not set no-new-privileges on capture, it blocks the file capability.) Suricata's NET_ADMIN, NET_RAW and SYS_NICE match its published requirements.
+- Partly fixed: `no-new-privileges` on capture and shipper; shipper also `read_only` with tmpfs `/tmp` (smoke run starts and fails only on missing token/salt). Capture still ran under no-new-privileges on Docker Desktop, but not tested on the Debian host. NET_ADMIN not dropped from capture and no `cap_drop` added (not requested).
 
 ### Checked, no finding
 - IP/MAC/hostname paths to the cloud: the capture-to-shipper file is local; the shipper emits only `device_hash`, country codes, counts and (redacted) signature, sid, category. Alert details in `rules.py` carry counts and country codes. Eve source and destination IPs are resolved to a hash and dropped (`eve.py:158`). Logs: `main.py:37` prints settings via a repr that hides token, salt and WAN IP; nothing logs window contents. The sender runs the privacy guard on the final bytes before every send.

@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { containsPii } from "../src/ingest";
-import { env, fetchWorker, gzip, postIngest, sampleBatch, sha256Hex } from "./helpers";
+import vectors from "./pii-vectors.json";
+import { env, fetchWorker, gzip, nowS, postIngest, sampleBatch, sha256Hex } from "./helpers";
 
 async function count(table: string): Promise<number> {
   const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>();
   return r!.n;
 }
+
+// Same vectors as sensor/shipper/tests/test_geo_anon_privacy.py: shipper and Worker must agree.
+describe("privacy vectors shared with the shipper", () => {
+  it.each(vectors.map((v) => [v.text, v.pii] as const))("containsPii(%j) = %s", (text, pii) => {
+    expect(containsPii(text)).toBe(pii);
+  });
+
+  it("rejects a JSON-escaped IPv4 (\\u0031...) that the raw-text scan cannot see", async () => {
+    const body = JSON.stringify(sampleBatch()).replace('"vendor":"Apple"', '"vendor":"\\u0031\\u0030.0.0.1"');
+    expect(body).toContain("\\u0031");
+    const res = await postIngest(body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+  });
+});
 
 describe("POST /api/ingest", () => {
   it("401 without a token", async () => {
@@ -194,6 +210,48 @@ describe("POST /api/ingest", () => {
       { status: 401, sensor_id: null, queue_depth: null },
       { status: 200, sensor_id: "sensor-01", queue_depth: 2 },
     ]);
+  });
+
+  it("100 bad-token POSTs write at most one 401 row, and 429s at most one row", async () => {
+    for (let i = 0; i < 100; i++) expect((await postIngest("{}", { token: "bad" })).status).toBe(401);
+    for (let i = 0; i < 70; i++) await postIngest("{}", { token: "bad", ip: "198.51.100.9" });
+    await new Promise((r) => setTimeout(r, 50));
+    const { results } = await env.DB.prepare("SELECT status, COUNT(*) AS n FROM ingest_log GROUP BY status ORDER BY status").all();
+    // The same-IP burst hits 401 (already throttled this minute) and then 429 (one row).
+    expect(results).toEqual([
+      { status: 401, n: 1 },
+      { status: 429, n: 1 },
+    ]);
+  });
+
+  it("authenticated failures still log a row each", async () => {
+    for (let i = 0; i < 3; i++) expect((await postIngest("not json")).status).toBe(400);
+    await postIngest(JSON.stringify(sampleBatch()));
+    const { results } = await env.DB.prepare("SELECT status, COUNT(*) AS n FROM ingest_log GROUP BY status ORDER BY status").all();
+    expect(results).toEqual([
+      { status: 200, n: 1 },
+      { status: 400, n: 3 },
+    ]);
+  });
+
+  it("rejects window and alert ts older than 8 days, accepts just inside", async () => {
+    const t = nowS();
+    const old = Math.floor((t - 8 * 86_400) / 60) * 60 - 60;
+    const b = sampleBatch();
+    b.windows[0]!.ts = old;
+    let res = await postIngest(JSON.stringify(b));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
+
+    const c = sampleBatch();
+    c.alerts[0]!.ts = t - 8 * 86_400 - 5;
+    res = await postIngest(JSON.stringify(c));
+    expect(res.status).toBe(400);
+
+    const ok = sampleBatch();
+    ok.windows[0]!.ts = Math.floor((t - 7 * 86_400) / 60) * 60;
+    ok.alerts[0]!.ts = t - 7 * 86_400;
+    expect((await postIngest(JSON.stringify(ok))).status).toBe(200);
   });
 
   it("gzip helper round trip sanity", async () => {

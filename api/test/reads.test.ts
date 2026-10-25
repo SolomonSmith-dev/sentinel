@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { env, fetchWorker, nowS, postIngest, sampleBatch } from "./helpers";
 
 async function getJson(path: string) {
@@ -15,17 +15,31 @@ describe("read endpoints", () => {
     expect(body).toEqual({ ok: true });
   });
 
+  it("security headers on API responses, including errors", async () => {
+    for (const p of ["/api/health", "/api/nope", "/api/metrics?t=hdr"]) {
+      const res = await fetchWorker(p);
+      expect(res.headers.get("x-content-type-options"), p).toBe("nosniff");
+      expect(res.headers.get("referrer-policy"), p).toBe("strict-origin-when-cross-origin");
+      const csp = res.headers.get("content-security-policy")!;
+      expect(csp, p).toContain("frame-ancestors 'none'");
+      expect(csp, p).toContain("https://fonts.googleapis.com");
+      expect(csp, p).toContain("https://fonts.gstatic.com");
+      expect(csp, p).toContain("https://static.cloudflareinsights.com");
+      await res.arrayBuffer();
+    }
+  });
+
   it("GET /api/flows shape and is_seed", async () => {
     await postIngest(JSON.stringify(sampleBatch()));
-    const { body } = await getJson("/api/flows?minutes=30");
+    const { body } = await getJson("/api/flows?minutes=30&t=shape");
     expect(body.minutes).toBe(30);
     expect(body.is_seed).toBe(false);
     expect(body.points).toHaveLength(1);
     expect(body.points[0]).toEqual({ ts: expect.any(Number), bytes_in: 120394, bytes_out: 20311, pkts: 412 });
     // clamping of minutes
-    expect((await getJson("/api/flows?minutes=1")).body.minutes).toBe(5);
-    expect((await getJson("/api/flows?minutes=99999")).body.minutes).toBe(1440);
-    expect((await getJson("/api/flows")).body.minutes).toBe(60);
+    expect((await getJson("/api/flows?minutes=1&t=shape")).body.minutes).toBe(5);
+    expect((await getJson("/api/flows?minutes=99999&t=shape")).body.minutes).toBe(1440);
+    expect((await getJson("/api/flows?t=shape")).body.minutes).toBe(60);
   });
 
   it("GET /api/alerts shape, newest first, limit and since", async () => {
@@ -33,7 +47,7 @@ describe("read endpoints", () => {
     const a0 = b.alerts[0]!;
     b.alerts.push({ ...a0, id: crypto.randomUUID(), ts: a0.ts + 5, type: "geo_anomaly", detail: { country: "RU" } as any });
     await postIngest(JSON.stringify(b));
-    const { body } = await getJson("/api/alerts");
+    const { body } = await getJson("/api/alerts?t=shape");
     expect(body.alerts).toHaveLength(2);
     expect(body.alerts[0]).toEqual({
       id: expect.any(String),
@@ -44,8 +58,8 @@ describe("read endpoints", () => {
       detail: { country: "RU" },
       is_seed: 0,
     });
-    expect((await getJson("/api/alerts?limit=1")).body.alerts).toHaveLength(1);
-    expect((await getJson(`/api/alerts?since=${a0.ts}`)).body.alerts).toHaveLength(1);
+    expect((await getJson("/api/alerts?limit=1&t=shape")).body.alerts).toHaveLength(1);
+    expect((await getJson(`/api/alerts?since=${a0.ts}&t=shape`)).body.alerts).toHaveLength(1);
   });
 
   it("GET /api/devices shape", async () => {
@@ -95,12 +109,12 @@ describe("read endpoints", () => {
   });
 
   it("GET /api/metrics shape", async () => {
-    const empty = (await getJson("/api/metrics")).body;
+    const empty = (await getJson("/api/metrics?t=empty")).body;
     expect(empty.sensor).toBeNull();
     expect(empty.seed_active).toBe(true);
     await postIngest("{}", { token: "bad" });
     await postIngest(JSON.stringify(sampleBatch()));
-    const { body } = await getJson("/api/metrics");
+    const { body } = await getJson("/api/metrics?t=full");
     expect(body).toEqual({
       ingest: {
         count_24h: 1,
@@ -117,7 +131,7 @@ describe("read endpoints", () => {
 
   it("304 on matching If-None-Match, for each endpoint", async () => {
     await postIngest(JSON.stringify(sampleBatch()));
-    for (const p of ["/api/health", "/api/flows", "/api/alerts", "/api/devices?t=304", "/api/top?t=304", "/api/metrics"]) {
+    for (const p of ["/api/health", "/api/flows?t=304", "/api/alerts?t=304", "/api/devices?t=304", "/api/top?t=304", "/api/metrics?t=304"]) {
       const first = await fetchWorker(p);
       const etag = first.headers.get("etag")!;
       await first.arrayBuffer();
@@ -142,6 +156,24 @@ describe("read endpoints", () => {
     expect(second.devices).toHaveLength(0);
     const uncached = await (await fetchWorker("/api/top?t=cache2")).json<any>();
     expect(uncached.devices).toHaveLength(1);
+  });
+
+  it("/api/metrics, /api/flows, /api/alerts are cached 10 s and a hit does not touch D1", async () => {
+    const real = env.DB;
+    for (const p of ["/api/metrics?t=c1", "/api/flows?t=c1", "/api/alerts?t=c1"]) {
+      expect((await fetchWorker(p)).status, p).toBe(200);
+      await new Promise((r) => setTimeout(r, 50));
+      const spy = vi.spyOn(real, "prepare");
+      const batchSpy = vi.spyOn(real, "batch");
+      const second = await fetchWorker(p);
+      expect(second.status, p).toBe(200);
+      expect(second.headers.get("cache-control"), p).toBe("public, max-age=10");
+      await second.arrayBuffer();
+      expect(spy, p).not.toHaveBeenCalled();
+      expect(batchSpy, p).not.toHaveBeenCalled();
+      spy.mockRestore();
+      batchSpy.mockRestore();
+    }
   });
 
   it("row counts in D1 match ingest", async () => {

@@ -1,11 +1,16 @@
 import { Hono } from "hono";
 import { scheduled } from "./cron";
 import type { AppEnv, Env } from "./env";
-import { errorResponse, jsonWithEtag } from "./http";
+import { errorResponse, jsonWithEtag, withSecurityHeaders } from "./http";
 import { handleIngest } from "./ingest";
 import { alerts, devices, flows, metrics, top } from "./reads";
 
 const app = new Hono<AppEnv>();
+
+app.use("*", async (c, next) => {
+  await next();
+  c.res = withSecurityHeaders(c.res);
+});
 
 app.post("/api/ingest", (c) => handleIngest(c.req.raw, c.env, c.executionCtx as ExecutionContext));
 app.get("/api/health", (c) => jsonWithEtag(c.req.raw, { ok: true }));

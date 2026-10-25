@@ -22,6 +22,10 @@ async function cachedJson(c: C, compute: () => Promise<unknown>): Promise<Respon
 }
 
 export async function flows(c: C): Promise<Response> {
+  return cachedJson(c, () => flowsBody(c));
+}
+
+async function flowsBody(c: C): Promise<unknown> {
   const minutes = intParam(c.req.query("minutes"), 60, 5, 1440);
   const since = Math.floor(now() / 60) * 60 - (minutes - 1) * 60;
   const { results } = await c.env.DB.prepare(
@@ -30,14 +34,18 @@ export async function flows(c: C): Promise<Response> {
   )
     .bind(since)
     .all<{ ts: number; bytes_in: number; bytes_out: number; pkts: number; is_seed: number }>();
-  return jsonWithEtag(c.req.raw, {
+  return {
     minutes,
     points: results.map(({ ts, bytes_in, bytes_out, pkts }) => ({ ts, bytes_in, bytes_out, pkts })),
     is_seed: results.some((r) => r.is_seed === 1),
-  });
+  };
 }
 
 export async function alerts(c: C): Promise<Response> {
+  return cachedJson(c, () => alertsBody(c));
+}
+
+async function alertsBody(c: C): Promise<unknown> {
   const limit = intParam(c.req.query("limit"), 50, 1, 200);
   const since = intParam(c.req.query("since"), 0, 0, Number.MAX_SAFE_INTEGER);
   const { results } = await c.env.DB.prepare(
@@ -46,9 +54,9 @@ export async function alerts(c: C): Promise<Response> {
   )
     .bind(since, limit)
     .all<{ id: string; type: string; device_hash: string; ts: number; severity: string; detail: string; is_seed: number }>();
-  return jsonWithEtag(c.req.raw, {
+  return {
     alerts: results.map((r) => ({ ...r, detail: safeJson(r.detail) })),
-  });
+  };
 }
 
 export async function devices(c: C): Promise<Response> {
@@ -99,6 +107,13 @@ export async function seedActive(db: D1Database, t: number): Promise<boolean> {
 }
 
 export async function metrics(c: C): Promise<Response> {
+  return cachedJson(c, () => metricsBody(c));
+}
+
+// failed_24h counts for 401, 429 and 503 (kill switch) are SAMPLED: unauthenticated failures write
+// at most one ingest_log row per status per minute (see unauthLogAllowed in ingest.ts), so these
+// are a lower bound, not exact counts. Authenticated outcomes (200/400/413/503 storage) are exact.
+async function metricsBody(c: C): Promise<unknown> {
   const t = now();
   const since = t - DAY;
   const db = c.env.DB;
@@ -130,12 +145,12 @@ export async function metrics(c: C): Promise<Response> {
   for (const r of failed!.results) failed_24h[String(r.status)] = Number(r.n);
   const s = sensor!.results[0];
   const r = rows!.results[0] ?? {};
-  return jsonWithEtag(c.req.raw, {
+  return {
     ingest: { count_24h: n, failed_24h, p50_ms: p50, p95_ms: p95 },
     sensor: s ? { sensor_id: s.sensor_id, last_seen: s.last_seen, queue_depth: s.queue_depth } : null,
     rows: { devices: Number(r.devices ?? 0), windows: Number(r.windows ?? 0), alerts: Number(r.alerts ?? 0) },
     seed_active: recentReal!.results.length === 0,
-  });
+  };
 }
 
 function safeJson(s: string): unknown {

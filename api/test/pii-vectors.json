@@ -1,0 +1,138 @@
+[
+ {
+  "text": "v2.0.1.3",
+  "pii": true
+ },
+ {
+  "text": "ET TROJAN Foo v2.0.1.3 beacon",
+  "pii": true
+ },
+ {
+  "text": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  "pii": false
+ },
+ {
+  "text": "ET SCAN Suspicious inbound to MSSQL port 1433",
+  "pii": false
+ },
+ {
+  "text": "ET INFO Observed DNS Query to .top TLD",
+  "pii": false
+ },
+ {
+  "text": "0.03",
+  "pii": false
+ },
+ {
+  "text": "0.41",
+  "pii": false
+ },
+ {
+  "text": "dev-3fa91c",
+  "pii": false
+ },
+ {
+  "text": "sid:2024897",
+  "pii": false
+ },
+ {
+  "text": "192.168.1.1",
+  "pii": true
+ },
+ {
+  "text": "10.0.0.1:443",
+  "pii": true
+ },
+ {
+  "text": "Foo_1.2.3.4",
+  "pii": true
+ },
+ {
+  "text": "build1.2.3.4",
+  "pii": true
+ },
+ {
+  "text": "g1.2.3.4h",
+  "pii": true
+ },
+ {
+  "text": "1.2.3",
+  "pii": false
+ },
+ {
+  "text": "1.2.3.4.5",
+  "pii": true
+ },
+ {
+  "text": "256.1.1.1",
+  "pii": true
+ },
+ {
+  "text": "sid:1:2:3",
+  "pii": true
+ },
+ {
+  "text": "aa:bb:cc:dd:ee:ff",
+  "pii": true
+ },
+ {
+  "text": "aa-bb-cc-dd-ee-ff",
+  "pii": true
+ },
+ {
+  "text": "xa4:83:e7:12:34:56",
+  "pii": true
+ },
+ {
+  "text": "a4:83:e7:12:34:56x",
+  "pii": true
+ },
+ {
+  "text": "2001:db8::1",
+  "pii": true
+ },
+ {
+  "text": "fe80::1",
+  "pii": true
+ },
+ {
+  "text": "::1",
+  "pii": true
+ },
+ {
+  "text": "::ffff:1.2.3.4",
+  "pii": true
+ },
+ {
+  "text": "1:2:3:4:5:6:7:8",
+  "pii": true
+ },
+ {
+  "text": "12:30:45",
+  "pii": true
+ },
+ {
+  "text": "12:30",
+  "pii": false
+ },
+ {
+  "text": "key:value",
+  "pii": false
+ },
+ {
+  "text": "ET POLICY Foo::Bar",
+  "pii": true
+ },
+ {
+  "text": "trojan.gen",
+  "pii": false
+ },
+ {
+  "text": "Windows 10.0.19045",
+  "pii": false
+ },
+ {
+  "text": "日本語 1.2.3.4 テスト",
+  "pii": true
+ }
+]

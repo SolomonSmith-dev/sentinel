@@ -135,3 +135,24 @@ def test_guard_blocks_wan_ip_even_without_pattern():
 def test_redact_scrubs_free_text():
     s = privacy.redact("ET POLICY 10.0.0.1 -> aa:bb:cc:dd:ee:ff via fe80::1")
     assert privacy.violations(s) == []
+
+
+# --- parity with the Worker -----------------------------------------------------
+# Same vectors as api/test/pii-vectors.json (vitest asserts the Worker side).
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_VECTORS = json.loads((Path(__file__).resolve().parents[3] / "api" / "test" / "pii-vectors.json").read_text())
+
+
+@pytest.mark.parametrize("vec", _VECTORS, ids=[v["text"] for v in _VECTORS])
+def test_privacy_matches_worker_vectors(vec):
+    assert bool(privacy.violations(vec["text"])) is vec["pii"]
+    # Anything the Worker would reject must be fully scrubbed by redact().
+    assert privacy.violations(privacy.redact(vec["text"])) == []
+
+
+def test_vectors_cover_required_cases():
+    texts = {v["text"] for v in _VECTORS}
+    assert {"v2.0.1.3", "0.03", "dev-3fa91c", "3f2504e0-4f89-11d3-9a0c-0305e82c3301"} <= texts
+    assert any("beacon" in t for t in texts)
