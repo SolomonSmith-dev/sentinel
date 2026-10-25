@@ -1,0 +1,25 @@
+{
+  "name": "sentinel-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate:local": "wrangler d1 migrations apply sentinel --local",
+    "migrate:remote": "wrangler d1 migrations apply sentinel --remote",
+    "seed:remote": "node scripts/seed-remote.ts",
+    "seed:local": "node scripts/seed-remote.ts --local"
+  },
+  "dependencies": {
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.7",
+    "@cloudflare/workers-types": "5.20261025.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "wrangler": "4.152.0"
+  }
+}
