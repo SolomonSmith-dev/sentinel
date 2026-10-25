@@ -33,15 +33,16 @@ export interface SeedAlert {
   detail: Record<string, string | number>;
 }
 
+// device_hash = first 6 hex chars of sha256("sentinel-seed-device-<n>"), n = 1..8.
 export const SEED_DEVICES: SeedDevice[] = [
-  { device_hash: "dev-5e0a11", vendor: "Apple", weight: 1.0, countries: ["US", "IE", "NL"] },
-  { device_hash: "dev-5e0b27", vendor: "Apple", weight: 0.6, countries: ["US", "JP"] },
-  { device_hash: "dev-5e0c3d", vendor: "Google", weight: 1.6, countries: ["US", "NL"] },
-  { device_hash: "dev-5e0d48", vendor: "Samsung", weight: 2.2, countries: ["US", "KR", "DE"] },
-  { device_hash: "dev-5e0e5f", vendor: "Raspberry Pi Foundation", weight: 0.3, countries: ["US", "GB", "??"] },
-  { device_hash: "dev-5e0f60", vendor: "Private MAC", weight: 0.8, countries: ["US", "CA"] },
-  { device_hash: "dev-5e1074", vendor: "Private MAC", weight: 0.5, countries: ["US", "FR"] },
-  { device_hash: "dev-5e1189", vendor: "Google", weight: 0.4, countries: ["US"] },
+  { device_hash: "dev-4bd03b", vendor: "Apple", weight: 1.0, countries: ["US", "IE", "NL"] },
+  { device_hash: "dev-f3157b", vendor: "Apple", weight: 0.6, countries: ["US", "JP"] },
+  { device_hash: "dev-a05e38", vendor: "Google", weight: 1.6, countries: ["US", "NL"] },
+  { device_hash: "dev-d35248", vendor: "Samsung", weight: 2.2, countries: ["US", "KR", "DE"] },
+  { device_hash: "dev-cfe5ea", vendor: "Raspberry Pi Foundation", weight: 0.3, countries: ["US", "GB", "??"] },
+  { device_hash: "dev-577369", vendor: "Private MAC", weight: 0.8, countries: ["US", "CA"] },
+  { device_hash: "dev-2fd239", vendor: "Private MAC", weight: 0.5, countries: ["US", "FR"] },
+  { device_hash: "dev-2f7eb3", vendor: "Google", weight: 0.4, countries: ["US"] },
 ];
 
 export const SEED_DEVICE_COUNT = SEED_DEVICES.length;
