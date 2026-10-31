@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { refreshRowCounts } from "../src/cron";
 import { env, fetchWorker, nowS, postIngest, sampleBatch } from "./helpers";
 
 async function getJson(path: string) {
@@ -114,6 +115,8 @@ describe("read endpoints", () => {
     expect(empty.seed_active).toBe(true);
     await postIngest("{}", { token: "bad" });
     await postIngest(JSON.stringify(sampleBatch()));
+    await refreshRowCounts(env, nowS());
+    await (caches as unknown as { default: Cache }).default.delete(new Request("https://sentinel.test/api/metrics"));
     const { body } = await getJson("/api/metrics?t=full");
     expect(body).toEqual({
       ingest: {
@@ -154,9 +157,29 @@ describe("read endpoints", () => {
     await new Promise((r) => setTimeout(r, 50));
     const second = await (await fetchWorker(p)).json<any>();
     expect(second.devices).toHaveLength(0);
-    const uncached = await (await fetchWorker("/api/top?t=cache2")).json<any>();
+    const bypass = await (await fetchWorker("/api/top?t=cache2")).json<any>();
+    expect(bypass.devices).toHaveLength(0);
+    const uncached = await (await fetchWorker("/api/top?minutes=5")).json<any>();
     expect(uncached.devices).toHaveLength(1);
   });
+
+  it.each(["flows", "top", "alerts", "devices", "metrics"])(
+    "%s ignores unknown query parameters and equivalent defaults in cache keys",
+    async (endpoint) => {
+      await (await fetchWorker(`/api/${endpoint}`)).arrayBuffer();
+      await new Promise((r) => setTimeout(r, 50));
+      const prepare = vi.spyOn(env.DB, "prepare");
+      try {
+        const defaults = endpoint === "flows" || endpoint === "top" ? "minutes=060" : "limit=50&since=0";
+        const res = await fetchWorker(`/api/${endpoint}?${defaults}&x=random&x=other`);
+        expect(res.status).toBe(200);
+        await res.arrayBuffer();
+        expect(prepare).not.toHaveBeenCalled();
+      } finally {
+        prepare.mockRestore();
+      }
+    },
+  );
 
   it("/api/metrics, /api/flows, /api/alerts are cached 10 s and a hit does not touch D1", async () => {
     const real = env.DB;

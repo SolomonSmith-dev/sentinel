@@ -76,8 +76,17 @@ export async function prune(env: Env, t: number): Promise<Record<string, number>
   return out;
 }
 
+export async function refreshRowCounts(env: Env, t: number): Promise<void> {
+  await env.DB.prepare(`INSERT INTO row_counts (id, devices, windows, alerts, updated_at)
+    SELECT 1, (SELECT COUNT(*) FROM devices), (SELECT COUNT(*) FROM windows),
+      (SELECT COUNT(*) FROM alerts), ?
+    ON CONFLICT(id) DO UPDATE SET devices = excluded.devices, windows = excluded.windows,
+      alerts = excluded.alerts, updated_at = excluded.updated_at`).bind(t).run();
+}
+
 export async function scheduled(controller: ScheduledController, env: Env): Promise<void> {
   const t = Math.floor(controller.scheduledTime / 1000);
   if (controller.cron === "17 3 * * *") await prune(env, t);
   else await seedTopUp(env, t);
+  await refreshRowCounts(env, t);
 }

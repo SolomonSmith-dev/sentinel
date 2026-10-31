@@ -10,6 +10,26 @@ async function count(table: string): Promise<number> {
 
 // Same vectors as sensor/shipper/tests/test_geo_anon_privacy.py: shipper and Worker must agree.
 describe("privacy vectors shared with the shipper", () => {
+  it.each(["johns-macbook.local", "PRINTER.LAN", "nas.home.arpa"])(
+    "rejects local hostname %s in values and escaped JSON", async (hostname) => {
+      const batch = sampleBatch({ devices: [{ device_hash: "dev-3fa91c", vendor: hostname, first_seen: nowS() }] });
+      const text = JSON.stringify(batch).replace(hostname, hostname.replaceAll(".", "\\u002e"));
+      const res = await postIngest(text);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+      expect(await count("devices")).toBe(0);
+    },
+  );
+  it("rejects a local hostname in alert details before any telemetry is stored", async () => {
+    const batch = sampleBatch({ alerts: [{
+      ...sampleBatch().alerts[0]!, detail: { signature: "ET INFO johns-macbook.local" },
+    }] });
+    const res = await postIngest(JSON.stringify(batch));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+    expect(await count("windows")).toBe(0);
+    expect(await count("alerts")).toBe(0);
+  });
   it.each(vectors.map((v) => [v.text, v.pii] as const))("containsPii(%j) = %s", (text, pii) => {
     expect(containsPii(text)).toBe(pii);
   });
@@ -24,6 +44,21 @@ describe("privacy vectors shared with the shipper", () => {
 });
 
 describe("POST /api/ingest", () => {
+  it.each([
+    ["ASCII at the limit", "a".repeat(2040), 200],
+    ["ASCII over the limit", "a".repeat(2041), 400],
+    ["emoji at the limit", "😀".repeat(510), 200],
+    ["emoji over the limit", "😀".repeat(510) + "a", 400],
+    ["multibyte text over the limit", "界".repeat(681), 400],
+  ])("enforces serialized UTF-8 detail size: %s", async (_label, value, status) => {
+    const batch = sampleBatch({
+      alerts: [{ ...sampleBatch().alerts[0]!, detail: { k: value } }],
+    });
+    const res = await postIngest(JSON.stringify(batch));
+    expect(res.status).toBe(status);
+    expect(await count("alerts")).toBe(status === 200 ? 1 : 0);
+  });
+
   it("401 without a token", async () => {
     const res = await postIngest(JSON.stringify(sampleBatch()), { token: null });
     expect(res.status).toBe(401);

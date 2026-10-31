@@ -11,7 +11,16 @@ export const SEED_IDLE_S = 15 * 60;
 /** Serve from the Cache API (10 s) when possible; ETag/304 still applies to hits. */
 async function cachedJson(c: C, compute: () => Promise<unknown>): Promise<Response> {
   const url = new URL(c.req.url);
-  url.searchParams.sort();
+  // Canonicalize the values actually used by each handler. Unknown parameters,
+  // duplicate parameters and alternate spellings must not create new cache entries.
+  const params = new URLSearchParams();
+  if (url.pathname === "/api/flows" || url.pathname === "/api/top") {
+    params.set("minutes", String(intParam(c.req.query("minutes"), 60, 5, 1440)));
+  } else if (url.pathname === "/api/alerts") {
+    params.set("limit", String(intParam(c.req.query("limit"), 50, 1, 200)));
+    params.set("since", String(intParam(c.req.query("since"), 0, 0, Number.MAX_SAFE_INTEGER)));
+  }
+  url.search = params.toString();
   const key = new Request(url.toString(), { method: "GET" });
   const cache = (caches as unknown as { default: Cache }).default;
   const hit = await cache.match(key);
@@ -125,7 +134,7 @@ async function metricsBody(c: C): Promise<unknown> {
        WHERE status = 200 AND sensor_id IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1`,
     ),
     db.prepare(
-      "SELECT (SELECT COUNT(*) FROM devices) AS devices, (SELECT COUNT(*) FROM windows) AS windows, (SELECT COUNT(*) FROM alerts) AS alerts",
+      "SELECT devices, windows, alerts FROM row_counts WHERE id = 1",
     ),
     db.prepare("SELECT 1 AS hit FROM windows WHERE ts > ? AND is_seed = 0 LIMIT 1").bind(t - SEED_IDLE_S),
   ]);

@@ -1,4 +1,10 @@
 [
+ {"text": "johns-macbook.local", "pii": true},
+ {"text": "PRINTER.LAN", "pii": true},
+ {"text": "nas.home.arpa.", "pii": true},
+ {"text": "host.internal", "pii": true},
+ {"text": "ET INFO Observed DNS Query to .local TLD", "pii": false},
+ {"text": "vendor.locality", "pii": false},
  {
   "text": "v2.0.1.3",
   "pii": true
