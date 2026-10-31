@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { containsPii } from "../src/ingest";
 import vectors from "./pii-vectors.json";
 import { env, fetchWorker, gzip, nowS, postIngest, sampleBatch, sha256Hex } from "./helpers";
@@ -298,5 +298,22 @@ describe("POST /api/ingest", () => {
     const res = await fetchWorker("/api/nope");
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "not_found" });
+  });
+});
+
+
+describe("rejected identifier privacy", () => {
+  it.each([false, true])("does not log escaped identifiers (over item cap: %s)", async (overCap) => {
+    const spy = vi.spyOn(console, "log");
+    try {
+      const body = JSON.stringify(sampleBatch({ sensor_id: "192.0.2.1",
+        ...(overCap ? { windows: Array(501).fill({}) } : {}),
+      })).replace("192.0.2.1", "192\\u002e0\\u002e2\\u002e1");
+      const response = await postIngest(body);
+      expect(response.status).toBe(400);
+      await expect.poll(async () => count("ingest_log")).toBe(1);
+      expect(await env.DB.prepare("SELECT sensor_id FROM ingest_log").first()).toEqual({ sensor_id: null });
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("192.0.2.1");
+    } finally { spy.mockRestore(); }
   });
 });

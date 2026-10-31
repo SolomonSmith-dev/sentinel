@@ -238,7 +238,6 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
   }
   if (json && typeof json === "object") {
     const o = json as Record<string, unknown>;
-    if (typeof o.sensor_id === "string") a.sensorId = o.sensor_id.slice(0, 64);
     const len = (k: string) => (Array.isArray(o[k]) ? (o[k] as unknown[]).length : 0);
     if (len("windows") > MAX_WINDOWS || len("alerts") > MAX_ALERTS || len("devices") > MAX_DEVICES) {
       return fail(400, "too_many_items", `At most ${MAX_WINDOWS} windows, ${MAX_ALERTS} alerts, ${MAX_DEVICES} devices per batch`);
