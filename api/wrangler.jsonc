@@ -30,7 +30,7 @@
       "simple": { "limit": 60, "period": 60 }
     }
   ],
-  "vars": { "INGEST_ENABLED": "true" },
+  "vars": { "INGEST_ENABLED": "true", "TELEMETRY_READS_ENABLED": "false" },
   "triggers": { "crons": ["*/5 * * * *", "17 3 * * *"] }
   // SENTINEL_TOKEN is a secret: `wrangler secret put SENTINEL_TOKEN`. Local dev reads .dev.vars.
 }

@@ -229,3 +229,18 @@ it("rate limits public readers without writing rejection logs", async () => {
   expect(res!.headers.get("retry-after")).toBe("60");
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ingest_log").first()).toEqual({ n: 0 });
 });
+
+
+it("blocks all telemetry before cache lookup when reads are disabled", async () => {
+  await fetchWorker("/api/devices");
+  const original = env.TELEMETRY_READS_ENABLED;
+  env.TELEMETRY_READS_ENABLED = "false";
+  try {
+    for (const path of ["devices", "alerts", "flows", "top", "metrics"]) {
+      const res = await fetchWorker(`/api/${path}`);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    expect((await fetchWorker("/api/health")).status).toBe(200);
+  } finally { env.TELEMETRY_READS_ENABLED = original; }
+});

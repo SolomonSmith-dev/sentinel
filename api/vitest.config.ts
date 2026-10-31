@@ -9,7 +9,7 @@ export default defineConfig(async () => {
         remoteBindings: false,
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations, SENTINEL_TOKEN: "test-token" },
+          bindings: { TEST_MIGRATIONS: migrations, SENTINEL_TOKEN: "test-token", TELEMETRY_READS_ENABLED: "true" },
         },
       }),
     ],

@@ -14,6 +14,9 @@ app.use("*", async (c, next) => {
 
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" && c.req.path !== "/api/health") {
+    if (c.env.TELEMETRY_READS_ENABLED !== "true") {
+      return errorResponse(403, "private_dashboard", "Network telemetry is private", { "cache-control": "no-store" });
+    }
     const ip = c.req.header("cf-connecting-ip") ?? "unknown";
     if (!(await c.env.READ_LIMITER.limit({ key: `read:${ip}` })).success) {
       return errorResponse(429, "rate_limited", "Too many read requests", { "retry-after": "60", "cache-control": "no-store" });
