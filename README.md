@@ -16,7 +16,7 @@ The home sensor reports live pseudonymized telemetry. Cloudflare Access restrict
 
 ![Sentinel dashboard, desktop](docs/images/dashboard-desktop.png)
 
-<sub>Desktop view of the live dashboard (synthetic demo data). A [mobile capture](docs/images/dashboard-mobile.png) is also in the repo.</sub>
+<sub>Desktop capture from the local synthetic-data preview, not the private production network. A [mobile capture](docs/images/dashboard-mobile.png) is also in the repo.</sub>
 
 ## Why I built this
 
