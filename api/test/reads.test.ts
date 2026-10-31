@@ -244,3 +244,13 @@ it("blocks all telemetry before cache lookup when reads are disabled", async () 
     expect((await fetchWorker("/api/health")).status).toBe(200);
   } finally { env.TELEMETRY_READS_ENABLED = original; }
 });
+
+
+it("rejects a cold read before D1 when the shared miss budget is exhausted", async () => {
+  const limiter = vi.spyOn(env.READ_MISS_LIMITER, "limit").mockResolvedValue({ success: false });
+  const database = vi.spyOn(env.DB, "prepare");
+  try {
+    expect((await fetchWorker("/api/devices")).status).toBe(429);
+    expect(database).not.toHaveBeenCalled();
+  } finally { limiter.mockRestore(); database.mockRestore(); }
+});

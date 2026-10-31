@@ -34,3 +34,8 @@ it("rejects missing and forged assertions even with a warm cache", async () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   }
 });
+
+
+it.each(["HEAD", "POST", "PUT", "DELETE"])("denies unauthenticated %s telemetry requests", async (method) => {
+  expect((await fetchWorker("/api/devices", { method, headers: { "cf-access-jwt-assertion": "" } })).status).toBe(403);
+});

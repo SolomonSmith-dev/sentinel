@@ -18,7 +18,7 @@ app.use("*", async (c, next) => {
 });
 
 app.use("/api/*", async (c, next) => {
-  if (c.req.method === "GET" && c.req.path !== "/api/health") {
+  if (c.req.path !== "/api/health" && !(c.req.method === "POST" && c.req.path === "/api/ingest")) {
     if (!(await authorizedReader(c.req.raw, c.env))) {
       return errorResponse(403, "private_dashboard", "Network telemetry is private", { "cache-control": "no-store" });
     }
