@@ -8,5 +8,5 @@ esac
 
 chown -R sentinel:sentinel /var/log/suricata /var/lib/suricata /var/run/suricata
 # AC-KS is the recommended software matcher when Hyperscan is unavailable.
-exec suricata -c /etc/suricata/suricata.yaml --user sentinel --group sentinel \
+exec python3 /supervisor.py suricata -c /etc/suricata/suricata.yaml --user sentinel --group sentinel \
   --set mpm-algo=ac-ks "$@"

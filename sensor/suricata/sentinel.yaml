@@ -56,3 +56,12 @@ af-packet:
 
 threading:
   set-cpu-affinity: no
+
+# Operational logs use Docker stdout retention, not another unbounded file.
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: no

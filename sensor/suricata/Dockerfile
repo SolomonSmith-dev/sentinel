@@ -34,6 +34,7 @@ RUN apt-get update \
 COPY --from=build /out/usr/bin/suricata /usr/bin/suricata
 COPY --from=build /out/etc/suricata /etc/suricata
 COPY entrypoint.sh /docker-entrypoint.sh
+COPY supervisor.py /supervisor.py
 RUN chmod 0755 /docker-entrypoint.sh /etc/suricata \
  && chmod 0644 /etc/suricata/*.config /etc/suricata/*.yaml
 ENTRYPOINT ["/docker-entrypoint.sh"]

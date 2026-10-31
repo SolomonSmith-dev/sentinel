@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -108,27 +109,41 @@ class EveTailer:
     def read(self) -> list[EveAlert]:
         """Read new complete lines. Call `commit()` once their alerts are queued."""
         self._pending = None
-        try:
-            st = os.stat(self.eve_path)
-        except FileNotFoundError:
-            return []
+        # Follow the saved inode across rename/reopen rotation before moving on.
+        paths = sorted(self.eve_path.parent.glob(self.eve_path.name + ".[0-9]*"))
+        if self.eve_path.exists():
+            paths.append(self.eve_path)
         saved = self._load()
-        if saved is None:
-            # First run: do not replay history that predates the shipper.
-            offset = st.st_size if self.start_at_end else 0
-        elif saved.inode != st.st_ino or st.st_size < saved.offset:
-            log.info("eve.json rotated or truncated; reading from the start")
-            offset = 0
+        if not paths:
+            return []
+        path = next((p for p in paths if saved and p.stat().st_ino == saved.inode), None)
+        if path is None:
+            if saved:
+                log.warning("EVE checkpoint inode missing: rotation retention may have lost unread alerts")
+            path = paths[0] if saved or not self.start_at_end else paths[-1]
+            offset = path.stat().st_size if saved is None and self.start_at_end else 0
         else:
             offset = saved.offset
+        st = path.stat()
+        if offset > st.st_size:
+            log.warning("EVE file truncated; restarting from byte zero")
+            offset = 0
+        if offset == st.st_size and path != paths[-1]:
+            # Writer reopens before new eve.json appears; allow flushes to settle.
+            if self.eve_path.exists() and time.time() - st.st_mtime >= 2:
+                path = paths[paths.index(path) + 1]
+                st, offset = path.stat(), 0
         if offset >= st.st_size:
             self._pending = Position(st.st_ino, offset)
             return []
-        with open(self.eve_path, "rb") as fh:
+        with open(path, "rb") as fh:
             fh.seek(offset)
             chunk = fh.read(MAX_READ_BYTES)
         end = chunk.rfind(b"\n")
         if end < 0:
+            if path != self.eve_path and self.eve_path.exists() and offset + len(chunk) >= st.st_size and time.time() - st.st_mtime >= 2:
+                log.warning("discarding incomplete final EVE record from closed archive")
+                offset = st.st_size
             self._pending = Position(st.st_ino, offset)
             return []
         complete = chunk[: end + 1]
