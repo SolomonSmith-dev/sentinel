@@ -7,6 +7,6 @@ case "${1:-}" in
 esac
 
 chown -R sentinel:sentinel /var/log/suricata /var/lib/suricata /var/run/suricata
-# Explicit AC matching avoids Hyperscan CPU requirements on the older sensor.
+# AC-KS is the recommended software matcher when Hyperscan is unavailable.
 exec suricata -c /etc/suricata/suricata.yaml --user sentinel --group sentinel \
-  --set mpm-algo=ac "$@"
+  --set mpm-algo=ac-ks "$@"

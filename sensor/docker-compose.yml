@@ -34,7 +34,7 @@ services:
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
     cpus: "1.0"
-    mem_limit: 1g
+    mem_limit: 1536m
     environment:
       # Run Suricata as uid/gid 10001 so the shipper (same ids) can read eve.json.
       PUID: "10001"

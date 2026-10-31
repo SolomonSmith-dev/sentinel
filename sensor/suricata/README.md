@@ -7,8 +7,10 @@ using generic x86-64 C/Rust instructions and no DPDK or Hyperscan libraries.
 Rust compilation uses a persistent BuildKit cache for subsequent rebuilds.
 
 `entrypoint.sh` prepares the writable rule/log volumes, then drops to UID/GID
-10001. AC matching avoids CPU-specific acceleration. The Compose service keeps
-one capture thread, a one-core CPU quota, and a 1 GB memory limit. ET Open rules
+10001. AC-KS matching avoids CPU-specific acceleration. The Compose service keeps
+one capture thread, a one-core CPU quota, and a 1.5 GiB memory limit. The full
+52k-rule set pressed against 1 GiB in live testing; low grouping, shared matcher
+contexts, and bounded flow/stream state limit additional growth. ET Open rules
 are refreshed at startup; the rules volume retains the last downloaded set.
 
 `sentinel.yaml` enables alert-only EVE output. Raw event addresses stay local;
