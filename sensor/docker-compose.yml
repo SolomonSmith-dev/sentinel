@@ -28,7 +28,9 @@ services:
     logging: *logging
 
   suricata:
-    image: jasonish/suricata:8.0.7
+    image: sentinel-suricata:8.0.7-debian
+    build:
+      context: ./suricata
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
     cpus: "1.0"
@@ -58,8 +60,10 @@ services:
     build:
       context: ../sensor/capture
     network_mode: host
-    cap_add: [NET_RAW, NET_ADMIN]
-    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]
+    # The non-root binary acquires NET_RAW from its file capability on exec.
+    # no-new-privileges would prevent that on Linux.
     cpus: "0.5"
     environment:
       SENTINEL_IFACE: ${SENTINEL_IFACE:-eth0}
@@ -79,6 +83,7 @@ services:
     env_file:
       - path: ../.env
         required: false
+    cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs:
