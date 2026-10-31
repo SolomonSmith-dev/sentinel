@@ -250,3 +250,21 @@ def test_token_never_logged(tmp_path, caplog):
     clock.t = s.next_attempt_at
     s.drain()
     assert TOKEN not in caplog.text and TOKEN not in repr(s)
+
+
+@respx.mock
+@pytest.mark.parametrize("status", [200, 301, 302, 303, 307, 308, 403])
+def test_proxy_login_response_preserves_batch(tmp_path, status):
+    respx.post(URL).mock(return_value=httpx.Response(status, text="<html>Sign in</html>"))
+    s = make_sender(tmp_path)
+    s.queue.put(body(1))
+    assert s.drain() == 0
+    assert len(s.queue) == 1
+    assert not list(s.queue.quarantine_dir.glob("*.json"))
+    assert s.next_attempt_at > s.clock()
+
+
+def test_prolonged_outage_backoff_stays_bounded(tmp_path):
+    s = make_sender(tmp_path)
+    s.attempt = 10000
+    assert 0 <= s.backoff() <= 300
