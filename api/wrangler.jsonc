@@ -30,7 +30,10 @@
       "simple": { "limit": 60, "period": 60 }
     }
   ],
-  "vars": { "INGEST_ENABLED": "true", "TELEMETRY_READS_ENABLED": "false" },
+  "vars": { "INGEST_ENABLED": "true", "TELEMETRY_READS_ENABLED": "true",
+    "ACCESS_ISSUER": "https://jellyfinsolo.cloudflareaccess.com",
+    "ACCESS_AUD": "dfb9f0771dc7923cefbfea08c3d2bba4ad45ef996e41aef4641da6ac31a1e5b7",
+    "ACCESS_EMAIL": "solomonsmithdev@gmail.com" },
   "triggers": { "crons": ["*/5 * * * *", "17 3 * * *"] }
   // SENTINEL_TOKEN is a secret: `wrangler secret put SENTINEL_TOKEN`. Local dev reads .dev.vars.
 }

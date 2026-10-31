@@ -1,3 +1,4 @@
+import { authorizedReader } from "./access";
 import { Hono } from "hono";
 import { scheduled } from "./cron";
 import type { AppEnv, Env } from "./env";
@@ -10,11 +11,15 @@ const app = new Hono<AppEnv>();
 app.use("*", async (c, next) => {
   await next();
   c.res = withSecurityHeaders(c.res);
+  // Internal edge cache remains usable behind auth; browsers must not retain telemetry.
+  if (c.req.path.startsWith("/api/") && c.req.path !== "/api/health") {
+    c.header("cache-control", "private, no-store");
+  }
 });
 
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" && c.req.path !== "/api/health") {
-    if (c.env.TELEMETRY_READS_ENABLED !== "true") {
+    if (!(await authorizedReader(c.req.raw, c.env))) {
       return errorResponse(403, "private_dashboard", "Network telemetry is private", { "cache-control": "no-store" });
     }
     const ip = c.req.header("cf-connecting-ip") ?? "unknown";

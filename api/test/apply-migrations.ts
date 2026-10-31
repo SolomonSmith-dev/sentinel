@@ -1,5 +1,15 @@
 import { applyD1Migrations, env } from "cloudflare:test";
-import { beforeEach } from "vitest";
+import { publicJwk } from "./access-fixture";
+import { beforeEach, vi } from "vitest";
+
+const nativeFetch = globalThis.fetch;
+vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (url === "https://sentinel-test.cloudflareaccess.com/cdn-cgi/access/certs") {
+    return Response.json({ keys: [publicJwk] });
+  }
+  return nativeFetch(input, init);
+});
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 

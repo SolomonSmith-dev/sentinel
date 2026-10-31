@@ -6,7 +6,7 @@ async function getJson(path: string) {
   const res = await fetchWorker(path);
   expect(res.status).toBe(200);
   expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]+"$/);
-  expect(res.headers.get("cache-control")).toBe("public, max-age=10");
+  expect(res.headers.get("cache-control")).toBe((path === "/api/health" ? "public, max-age=10" : "private, no-store"));
   return { res, body: await res.json<any>() };
 }
 
@@ -190,7 +190,7 @@ describe("read endpoints", () => {
       const batchSpy = vi.spyOn(real, "batch");
       const second = await fetchWorker(p);
       expect(second.status, p).toBe(200);
-      expect(second.headers.get("cache-control"), p).toBe("public, max-age=10");
+      expect(second.headers.get("cache-control"), p).toBe("private, no-store");
       await second.arrayBuffer();
       expect(spy, p).not.toHaveBeenCalled();
       expect(batchSpy, p).not.toHaveBeenCalled();
@@ -239,7 +239,7 @@ it("blocks all telemetry before cache lookup when reads are disabled", async () 
     for (const path of ["devices", "alerts", "flows", "top", "metrics"]) {
       const res = await fetchWorker(`/api/${path}`);
       expect(res.status).toBe(403);
-      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
     }
     expect((await fetchWorker("/api/health")).status).toBe(200);
   } finally { env.TELEMETRY_READS_ENABLED = original; }

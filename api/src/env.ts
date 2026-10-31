@@ -6,6 +6,9 @@ export interface Env {
   READ_MISS_LIMITER: RateLimit;
   INGEST_ENABLED: string;
   TELEMETRY_READS_ENABLED?: string;
+  ACCESS_AUD?: string;
+  ACCESS_ISSUER?: string;
+  ACCESS_EMAIL?: string;
   SENTINEL_TOKEN?: string;
 }
 

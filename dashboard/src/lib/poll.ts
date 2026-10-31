@@ -62,7 +62,10 @@ export function usePoll<T>(url: string): PollState<T> {
           signal: ctrl.signal,
         });
         if (disposed) return;
-        if (res.status === 304 && entry) {
+        if (res.status === 401 || res.status === 403 || res.redirected) {
+          cache.clear();
+          setState({ data: undefined, error: "Sign in again to view private telemetry.", updatedAt: undefined, pending: false });
+        } else if (res.status === 304 && entry) {
           setState({ data: entry.data as T, error: undefined, updatedAt: Date.now(), pending: false });
         } else if (res.ok) {
           const data = (await res.json()) as T;

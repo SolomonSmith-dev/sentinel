@@ -142,3 +142,18 @@ still scan the three telemetry tables; the scan frequency is bounded independent
 Free-tier budget: D1 allows 100k rows written per day, and every index entry counts as a row written (measured: the 24 h seed backfill cost 57.8k row-writes for 11.6k rows). `windows` therefore carries a single secondary index. The sensor never ships a window with `pkts == 0` and sends a device in `devices` only when it is new or was last sent more than 10 minutes ago. A LAN with 20 devices active at once stays near 60k row-writes a day; seed top-up stops once real data flows.
 
 Read protection: telemetry GETs allow 120 requests per minute per client IP. Cache misses additionally share a 120/minute budget per Cloudflare location (best effort, not a global billing cap). Alert cursors and limits filter a shared latest-200, seven-day snapshot without extra D1 reads. Rate-limited responses use 429, Retry-After: 60 and no-store.
+
+
+## Private dashboard access
+
+Telemetry is no longer public. Cloudflare Access protects the entire hostname
+with an exact-email allow policy for the owner and one-time PIN login.
+`/api/ingest` has a separate, exact-path Access exception because it authenticates
+with the existing Worker bearer token. This exception does not grant read access.
+The Worker independently verifies Access JWT signature, RS256 algorithm, issuer,
+audience, expiry, required identity claims, token type and the owner's email
+before any telemetry cache lookup. Missing configuration fails closed.
+`TELEMETRY_READS_ENABLED=false` is an emergency read kill switch, not an auth bypass.
+Telemetry browser responses are `private, no-store`; only the internal edge
+snapshot is cached. Existing copies already retrieved before access was restricted
+cannot be recalled. Ingest credentials never authenticate dashboard reads.
