@@ -12,7 +12,7 @@
 
 **Live dashboard: https://sentinel.solomonsmith.dev**
 
-The public page shows labeled synthetic seed data until the home sensor reports. Monitor only. No payloads are captured, and no IP address, MAC address or hostname ever leaves the house.
+The home sensor reports live anonymized telemetry. Earlier synthetic demo history remains visible and labeled during the transition. Monitor only. No payloads are stored, and IP addresses and MAC addresses stay on the sensor; common local DNS names are rejected or redacted before shipping.
 
 ![Sentinel dashboard, desktop](docs/images/dashboard-desktop.png)
 

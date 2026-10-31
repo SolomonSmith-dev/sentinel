@@ -52,7 +52,7 @@ export default function App() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-      <Header seed={seed} live={visible} />
+      <Header seed={seed} live={visible} reporting={metrics.data?.seed_active === false} />
       <main className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2"><TrafficChart poll={flows} minutes={minutes} onMinutes={onMinutes} /></div>
         <div className="min-w-0"><AlertFeed poll={alerts} /></div>

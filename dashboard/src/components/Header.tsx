@@ -16,7 +16,7 @@ function GitHubIcon() {
   );
 }
 
-export function SeedBadge() {
+export function SeedBadge({ reporting = false }: { reporting?: boolean }) {
   return (
     <p
       role="note"
@@ -25,12 +25,15 @@ export function SeedBadge() {
       <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 shrink-0 fill-none stroke-seed" strokeWidth="1.4">
         <circle cx="6" cy="6" r="4.8" /><path d="M6 5.4v3M6 3.4v.2" strokeLinecap="round" />
       </svg>
-      <span><span className="font-medium text-ink">Demo data:</span> synthetic seed until the live sensor reports</span>
+      <span>{reporting
+        ? <><span className="font-medium text-ink">Live sensor connected.</span> Earlier synthetic demo data remains visible.</>
+        : <><span className="font-medium text-ink">Demo data:</span> synthetic seed until the live sensor reports</>}
+      </span>
     </p>
   );
 }
 
-export function Header({ seed, live }: { seed: boolean; live: boolean }) {
+export function Header({ seed, live, reporting = false }: { seed: boolean; live: boolean; reporting?: boolean }) {
   return (
     <header className="rise flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
@@ -79,7 +82,7 @@ export function Header({ seed, live }: { seed: boolean; live: boolean }) {
         </ol>
       </nav>
 
-      {seed && <div><SeedBadge /></div>}
+      {seed && <div><SeedBadge reporting={reporting} /></div>}
     </header>
   );
 }
