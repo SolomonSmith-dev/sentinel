@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlsplit
 
 
 class ConfigError(ValueError):
@@ -65,8 +66,15 @@ class Settings:
             )
         api = get("SENTINEL_API", "https://sentinel.solomonsmith.dev")
         assert api is not None and token is not None and salt is not None
-        if not api.startswith(("https://", "http://")):
-            raise ConfigError("SENTINEL_API must be an http(s) URL")
+        try:
+            endpoint = urlsplit(api)
+            valid_port = endpoint.port is None or 1 <= endpoint.port <= 65535
+        except ValueError:
+            raise ConfigError("SENTINEL_API must be a valid HTTPS URL") from None
+        if (endpoint.scheme != "https" or not endpoint.hostname or not valid_port
+                or endpoint.username is not None or endpoint.password is not None
+                or endpoint.query or endpoint.fragment):
+            raise ConfigError("SENTINEL_API must use HTTPS without credentials, query or fragment")
         retrain_at = get("SENTINEL_RETRAIN_AT", "03:30") or "03:30"
         _parse_hhmm(retrain_at)
         return cls(

@@ -237,3 +237,13 @@ def test_idle_device_window_not_shipped(tmp_path, geo, oui):
     # its new_device alert still ships, so it is listed
     assert idle_dh in {a["device_hash"] for a in body["alerts"]}
     p.state.close()
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://example.com", "http://127.0.0.1:8080", "http://[::1]:8080",
+    "https://", "https://example.com:bad", "https://user:password@example.com",
+    "https://example.com?token=x", "https://example.com#fragment", "https://[broken",
+])
+def test_config_rejects_insecure_or_ambiguous_endpoint(endpoint):
+    with pytest.raises(ConfigError, match="HTTPS"):
+        Settings.from_env({"SENTINEL_TOKEN": "fake", "SENTINEL_SALT": "fake", "SENTINEL_API": endpoint})

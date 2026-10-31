@@ -95,3 +95,5 @@ Docker image downloads the full geo and OUI tables at build time.
 
 numpy is pinned to 2.3.x on purpose. numpy 2.4 wheels require x86-64-v2
 (SSE4.2), and the sensor host's Core 2 Duo does not have it.
+
+The configured ingest endpoint must use HTTPS, including local development. Plain HTTP, URL credentials, query strings and fragments are rejected before the shipper starts. This prevents accidentally sending the bearer token in cleartext.
