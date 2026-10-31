@@ -2,6 +2,8 @@ export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   INGEST_LIMITER: RateLimit;
+  READ_LIMITER: RateLimit;
+  READ_MISS_LIMITER: RateLimit;
   INGEST_ENABLED: string;
   SENTINEL_TOKEN?: string;
 }

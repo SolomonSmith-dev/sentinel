@@ -12,6 +12,16 @@ app.use("*", async (c, next) => {
   c.res = withSecurityHeaders(c.res);
 });
 
+app.use("/api/*", async (c, next) => {
+  if (c.req.method === "GET" && c.req.path !== "/api/health") {
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+    if (!(await c.env.READ_LIMITER.limit({ key: `read:${ip}` })).success) {
+      return errorResponse(429, "rate_limited", "Too many read requests", { "retry-after": "60", "cache-control": "no-store" });
+    }
+  }
+  await next();
+});
+
 app.post("/api/ingest", (c) => handleIngest(c.req.raw, c.env, c.executionCtx as ExecutionContext));
 app.get("/api/health", (c) => jsonWithEtag(c.req.raw, { ok: true }));
 app.get("/api/flows", flows);

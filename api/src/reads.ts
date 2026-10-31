@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env";
 import { now } from "./env";
-import { conditional, intParam, jsonWithEtag } from "./http";
+import { conditional, errorResponse, intParam, jsonWithEtag } from "./http";
 
 type C = Context<AppEnv>;
 
@@ -9,25 +9,25 @@ const DAY = 86_400;
 export const SEED_IDLE_S = 15 * 60;
 
 /** Serve from the Cache API (10 s) when possible; ETag/304 still applies to hits. */
-async function cachedJson(c: C, compute: () => Promise<unknown>): Promise<Response> {
+async function cachedJson(c: C, compute: () => Promise<unknown>, transform?: (body: any) => unknown): Promise<Response> {
   const url = new URL(c.req.url);
   // Canonicalize the values actually used by each handler. Unknown parameters,
   // duplicate parameters and alternate spellings must not create new cache entries.
   const params = new URLSearchParams();
   if (url.pathname === "/api/flows" || url.pathname === "/api/top") {
     params.set("minutes", String(intParam(c.req.query("minutes"), 60, 5, 1440)));
-  } else if (url.pathname === "/api/alerts") {
-    params.set("limit", String(intParam(c.req.query("limit"), 50, 1, 200)));
-    params.set("since", String(intParam(c.req.query("since"), 0, 0, Number.MAX_SAFE_INTEGER)));
   }
   url.search = params.toString();
   const key = new Request(url.toString(), { method: "GET" });
   const cache = (caches as unknown as { default: Cache }).default;
   const hit = await cache.match(key);
-  if (hit) return conditional(c.req.raw, hit);
+  if (hit) return transform ? jsonWithEtag(c.req.raw, transform(await hit.json())) : conditional(c.req.raw, hit);
+  if (!(await c.env.READ_MISS_LIMITER.limit({ key: "read-misses" })).success) {
+    return errorResponse(429, "rate_limited", "Read budget exceeded; retry later", { "retry-after": "60", "cache-control": "no-store" });
+  }
   const fresh = await jsonWithEtag(key, await compute());
   c.executionCtx.waitUntil(cache.put(key, fresh.clone()).catch(() => undefined));
-  return conditional(c.req.raw, fresh);
+  return transform ? jsonWithEtag(c.req.raw, transform(await fresh.json())) : conditional(c.req.raw, fresh);
 }
 
 export async function flows(c: C): Promise<Response> {
@@ -51,17 +51,20 @@ async function flowsBody(c: C): Promise<unknown> {
 }
 
 export async function alerts(c: C): Promise<Response> {
-  return cachedJson(c, () => alertsBody(c));
+  const limit = intParam(c.req.query("limit"), 50, 1, 200);
+  const since = intParam(c.req.query("since"), 0, 0, Number.MAX_SAFE_INTEGER);
+  // Filtering the latest 200 preserves strict cursor semantics for every limit <= 200.
+  return cachedJson(c, () => alertsBody(c), (body) => ({
+    alerts: body.alerts.filter((a: { ts: number }) => a.ts > since).slice(0, limit),
+  }));
 }
 
 async function alertsBody(c: C): Promise<unknown> {
-  const limit = intParam(c.req.query("limit"), 50, 1, 200);
-  const since = intParam(c.req.query("since"), 0, 0, Number.MAX_SAFE_INTEGER);
   const { results } = await c.env.DB.prepare(
     `SELECT id, type, device_hash, ts, severity, detail, is_seed FROM alerts
      WHERE ts > ? ORDER BY ts DESC, id DESC LIMIT ?`,
   )
-    .bind(since, limit)
+    .bind(now() - 7 * DAY, 200)
     .all<{ id: string; type: string; device_hash: string; ts: number; severity: string; detail: string; is_seed: number }>();
   return {
     alerts: results.map((r) => ({ ...r, detail: safeJson(r.detail) })),

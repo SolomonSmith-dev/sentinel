@@ -9,7 +9,7 @@ beforeEach(async () => {
   const cache = (caches as unknown as { default: Cache }).default;
   const m = Math.floor(Date.now() / 60_000);
   // Public cache keys now ignore test-only query parameters too.
-  const readKeys = ["metrics", "devices"].map((p) => `https://sentinel.test/api/${p}`);
+  const readKeys = ["metrics", "devices", "alerts"].map((p) => `https://sentinel.test/api/${p}`);
   for (const p of ["flows", "top"]) {
     for (const minutes of [5, 30, 60, 1440]) readKeys.push(`https://sentinel.test/api/${p}?minutes=${minutes}`);
   }

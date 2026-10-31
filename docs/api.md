@@ -140,3 +140,5 @@ still scan the three telemetry tables; the scan frequency is bounded independent
 - `17 3 * * *` prune: delete real rows older than 7 days, seed rows older than 24 h, `idempotency` and `ingest_log` rows older than 24 h.
 
 Free-tier budget: D1 allows 100k rows written per day, and every index entry counts as a row written (measured: the 24 h seed backfill cost 57.8k row-writes for 11.6k rows). `windows` therefore carries a single secondary index. The sensor never ships a window with `pkts == 0` and sends a device in `devices` only when it is new or was last sent more than 10 minutes ago. A LAN with 20 devices active at once stays near 60k row-writes a day; seed top-up stops once real data flows.
+
+Read protection: telemetry GETs allow 120 requests per minute per client IP. Cache misses additionally share a 120/minute budget per Cloudflare location (best effort, not a global billing cap). Alert cursors and limits filter a shared latest-200, seven-day snapshot without extra D1 reads. Rate-limited responses use 429, Retry-After: 60 and no-store.

@@ -12,7 +12,7 @@ export function freshIp(): string {
 }
 
 export function fetchWorker(path: string, init?: RequestInit): Promise<Response> {
-  return (exports as unknown as { default: Fetcher }).default.fetch(new Request(BASE + path, init));
+  return (exports as unknown as { default: Fetcher }).default.fetch(new Request(BASE + path, { ...init, headers: { "cf-connecting-ip": freshIp(), ...Object.fromEntries(new Headers(init?.headers)) } }));
 }
 
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {

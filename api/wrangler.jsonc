@@ -21,6 +21,8 @@
     }
   ],
   "ratelimits": [
+    { "name": "READ_LIMITER", "namespace_id": "7302", "simple": { "limit": 120, "period": 60 } },
+    { "name": "READ_MISS_LIMITER", "namespace_id": "7303", "simple": { "limit": 120, "period": 60 } },
     {
       "name": "INGEST_LIMITER",
       // Account-unique integer id for this namespace.

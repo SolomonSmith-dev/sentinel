@@ -205,3 +205,27 @@ describe("read endpoints", () => {
     expect(r!.n).toBe(1);
   });
 });
+
+
+it("shares the alert database snapshot across distinct cursors and limits", async () => {
+  await postIngest(JSON.stringify(sampleBatch()));
+  const first = await getJson("/api/alerts");
+  const ts = first.body.alerts[0].ts;
+  await new Promise((r) => setTimeout(r, 50));
+  const spy = vi.spyOn(env.DB, "prepare");
+  try {
+    for (const since of [0, 1, ts - 1, ts, ts + 1]) {
+      const { body } = await getJson(`/api/alerts?since=${since}&limit=1`);
+      expect(body.alerts).toHaveLength(since < ts ? 1 : 0);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  } finally { spy.mockRestore(); }
+});
+
+it("rate limits public readers without writing rejection logs", async () => {
+  let res: Response | undefined;
+  for (let i = 0; i < 121; i++) res = await fetchWorker("/api/devices", { headers: { "cf-connecting-ip": "198.51.100.200" } });
+  expect(res!.status).toBe(429);
+  expect(res!.headers.get("retry-after")).toBe("60");
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ingest_log").first()).toEqual({ n: 0 });
+});
