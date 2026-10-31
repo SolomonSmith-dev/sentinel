@@ -80,7 +80,7 @@ Privacy guard: the Worker scans both decompressed JSON text and decoded content 
 
 ## Read endpoints
 
-All are public, `GET`, JSON, and send `ETag` and `Cache-Control: public, max-age=10`. `If-None-Match` matching → 304. Worker caches `/api/top` and `/api/devices` for 10 s with the Cache API.
+Telemetry reads require an owner Cloudflare Access session. They return JSON with `ETag` and `Cache-Control: private, no-store`. Matching `If-None-Match` returns 304 after authentication. The Worker caches internal read snapshots for 10 seconds; browsers do not cache telemetry. `/api/health` contains no telemetry.
 
 ### GET /api/flows?minutes=60
 `minutes` in [5, 1440], default 60. Per-minute totals across all devices.
@@ -119,7 +119,7 @@ Top 10 of each by total bytes.
 The Worker records each ingest attempt (status, duration ms) in `ingest_log`. `sensor` is null until a real sensor has posted.
 
 `rows` is a snapshot refreshed after each successful cron run (normally every five minutes),
-not a live count. Public requests read one snapshot row instead of scanning telemetry tables.
+not a live count. Authenticated requests read one snapshot row instead of scanning telemetry tables.
 Until the first snapshot exists, counts are zero. Unknown query parameters are ignored by
 read-cache keys; supported numeric parameters are clamped and normalized before caching.
 

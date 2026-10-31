@@ -63,3 +63,40 @@ Fix: require HTTPS outside an explicit loopback-only development exception. Test
 - No full container CVE scan, packet fuzzing, host compromise assessment, production rate-limit test or external infrastructure audit was performed.
 
 Verdict: address the logging privacy failure, read-path resource abuse and unbounded alert retention, and refresh development dependencies before treating the project as security-hardened.
+
+
+## Remediation and production verification
+
+Completed later on 2026-10-31; the findings above preserve the audited baseline.
+
+| Finding | Fix commit | Verification |
+| --- | --- | --- |
+| S1 rejected identifiers | `2039d0c` | Escaped identifier and oversized-batch regressions; production rejection log has null sensor_id |
+| S2 read resource abuse | `c209044` | Shared alert snapshot, per-IP and per-location miss budgets; cursor and budget-denial tests |
+| S3 unbounded EVE storage | `89c7af8` | Rename/reopen rotation, bounded archives and hard per-file safety cap; unread/restart/partial-record tests and live rotation |
+| S4 development dependencies | `e01e280` | Patched Cloudflare tools; complete API npm audit reports zero findings |
+| S5 plaintext endpoint | `5f9cc54` | HTTPS-only validation, nine rejection cases; deployed shipper uploading over HTTPS |
+
+The owner rejected public live telemetry as a product security decision. That
+exposure is now closed, superseding the audit's earlier characterization as an
+intentional tradeoff. `2744367` disabled reads during setup; `16ffc6b` added
+owner-only Access JWT verification; `1cac563` covers every request method.
+Cloudflare Access uses one-time email PIN authentication and an exact-email allow
+policy. The only Access exception is the ingest path, which still requires the
+sensor bearer token. Browser telemetry responses use private/no-store and the UI
+clears cached panel data on explicit authentication failure.
+
+`f89e029` additionally preserves uploads across proxy authentication failures and
+caps exponential-backoff arithmetic. Two batches affected during Access setup
+were requeued, uploaded successfully, and left no quarantine backlog.
+
+Final verification: 112 API tests, 197 Python tests including retention, four C++
+suites, dashboard production build, shellcheck, and zero API npm audit findings.
+Production owner login and all five telemetry API views passed. Forged assertion
+requests were blocked across the dashboard and all telemetry endpoints. D1
+confirmed synthetic rejected PII was not persisted in the attempt identifier.
+The sensor reader advanced to the new active inode after controlled rotation,
+with queues empty and zero automatic container restarts. Full container OS CVE
+scanning and distributed-load testing remain outside this verification scope.
+
+A harmless post-rotation IDS diagnostic produced two expected SID 2100498 alerts in production D1. The final Git-history secret scan passed with two exact historical fingerprints excluded after inspection: the public Access audience ID and audit prose. No credential values were excluded.

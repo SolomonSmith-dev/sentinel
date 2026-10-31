@@ -1,6 +1,6 @@
 # Sentinel
 
-**A home-network security monitor I run on my own LAN: C++ libpcap sensor, Suricata, an isolation-forest anomaly score, and an anonymized public dashboard on Cloudflare Workers + D1.**
+**A home-network security monitor I run on my own LAN: C++ libpcap sensor, Suricata, an isolation-forest anomaly score, and a private, email-authenticated dashboard on Cloudflare Workers + D1.**
 
 [![ci](https://github.com/SolomonSmith-dev/sentinel/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SolomonSmith-dev/sentinel/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -12,7 +12,7 @@
 
 **Live dashboard: https://sentinel.solomonsmith.dev**
 
-The home sensor reports live anonymized telemetry. Earlier synthetic demo history remains visible and labeled during the transition. Monitor only. No payloads are stored, and IP addresses and MAC addresses stay on the sensor; common local DNS names are rejected or redacted before shipping.
+The home sensor reports live pseudonymized telemetry. Cloudflare Access restricts the dashboard to the owner’s email login; the Worker also validates the signed session before returning data. Earlier synthetic demo history remains visible and labeled during the transition. Monitor only. No payloads are stored, and IP addresses and MAC addresses stay on the sensor; common local DNS names are rejected or redacted before shipping.
 
 ![Sentinel dashboard, desktop](docs/images/dashboard-desktop.png)
 
@@ -49,7 +49,7 @@ flowchart LR
   SHIP -- "HTTPS, bearer token,<br/>Idempotency-Key" --> W
 ```
 
-The public URL never reaches into the LAN. The sensor pushes out; nothing on the home network accepts inbound connections for this.
+The dashboard URL never reaches into the LAN. The sensor pushes out; nothing on the home network accepts inbound connections for this.
 
 ## Privacy by design
 

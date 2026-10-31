@@ -1,6 +1,34 @@
 # STATUS
 
-Updated 2026-10-31 PT. Cloud and home-server sensor deployment verified live.
+Updated 2026-10-31 PT. Security fixes deployed; dashboard is private.
+
+## Security deployment
+
+All five findings in `docs/security_audit_2026-10-31.md` are addressed. The owner
+also identified live public telemetry as unacceptable; it now requires Cloudflare
+Access one-time PIN login for solomonsmithdev@gmail.com, with JWT verification
+inside the Worker and private/no-store browser responses. The original public
+status checks below are historical and superseded by this section.
+
+- Dashboard Access app: `b3ecd679-4537-4a12-b6ba-003eab91a423`.
+- Exact `/api/ingest` Access exception: `7e22ee4c-946a-450d-a16f-686ef481872d`;
+  the Worker still enforces its existing bearer token. No telemetry read exception.
+- Worker deployment: `850e94c6-46b6-4b54-bb48-b82ef3d83ef4`.
+- Verification: owner email login and all five telemetry endpoints passed;
+  forged assertions blocked on all five endpoints. Rejected private identifier
+  remained null in production D1. Sensor uploads resumed with queue/quarantine 0.
+- Two batches affected by the transient Access redirect were restored and sent;
+  the sender now retries redirects/403/unexpected 200 responses without losing them.
+- Tests: 112 API, 197 Python including retention, four C++ suites; dashboard
+  production build and shellcheck passed. API npm audit reports zero vulnerabilities.
+- Retention was force-rotated in production: new inode opened, reader advanced,
+  no automatic restarts. Existing unrelated ARDA services stayed healthy.
+
+Recovery: set `TELEMETRY_READS_ENABLED=false` and deploy to disable reads. Missing
+Access issuer/audience/owner configuration also fails closed. Keep the root
+hostname owner-only and preserve only the exact ingestion path exception.
+Do not restore public reads as a workaround for authentication errors.
+
 
 ## Result
 
@@ -9,7 +37,7 @@ All five phases done. Live at https://sentinel.solomonsmith.dev, showing labeled
 | Phase | Result | Proof |
 |---|---|---|
 | 0 Skeleton, contract, CI | done | repo public, CI green on every push |
-| 1 Worker + D1 | done, deployed | vitest 80/80; prod: no token → 401, every read endpoint 200 |
+| 1 Worker + D1 | done, deployed | vitest 112/112; ingest without token → 401; telemetry requires owner Access login |
 | 2 Dashboard | done, deployed | rendered on the live domain in a browser; no console errors except the analytics beacon |
 | 3 C++ capture | done | ctest 4/4 (unit + 3 pcap replays with exact values); Linux Docker build verified |
 | 4 Shipper + ML | done | pytest 158/158; end to end replay (pcap → capture → shipper → local Worker → D1) produced 2 port_scan, 1 flood, 6 new_device, 0 attack alerts on benign |
@@ -58,7 +86,7 @@ The dashboard labels retained synthetic history alongside live reporting. ML imp
 
 - Local QA fixes: F2 cache canonicalization and cron row-count snapshot, F5 UTF-8 detail cap, F6 local-DNS hostname guard, F9 capability hardening. Cloud deployment verified 2026-10-31: migration 0003 applied; Worker version 373c6d97-cd2c-4d61-97d1-518bfea7f826 live. Public endpoints, assets, security headers, conditional requests, browser rendering, and scheduled snapshot refresh verified. Production token rotated with explicit approval; owner-only token/salt files live under ~/.config/sentinel on home-server and are mounted read-only, outside the checkout. Capture and shipper are deployed, reporting sensor-01 with an empty queue; authenticated hostname/UTF-8 production probes pass. Suricata 8.0.7 is deployed from SHA-256-checked source with generic x86-64 instructions; the final diagnostic alert reached production. IDS memory is bounded at 1.5 GiB. Dashboard version ce6e9794-8874-4d27-9d71-92ed506d5412 labels live reporting and retained synthetic history correctly. See docs/qa-findings.md for limits.
 - Capture caps are first-come: spoofing more than 4096 MACs in one 10 s window crowds out real hosts (logged, not alerted).
-- `eve.json` is never rotated (small, alerts only).
+- IDS EVE retention is now bounded: 16 MiB/hourly rotation, 128 MiB/24-hour archives, 64 MiB per-file emergency limit. Reader drains unread archived inodes; retention loss is warned.
 - Seed device IDs all start with `dev-5e0`. The fix is on branch `seed-hash-refresh`. Re-seeding costs about 58k D1 writes, so deploy it after a UTC day reset (17:00 PT): merge, `npx wrangler deploy`, delete `is_seed=1` rows, `npm run seed:remote`.
 - `.env.example` still says "earendil" in two comments (edit blocked by the `.env` deny rule).
 - Portfolio PR to merge: https://github.com/SolomonSmith-dev/SolomonSmith-dev.github.io/pull/6 (Sentinel card below CourtRules). Check the card against the master resume rule in that repo's CLAUDE.md.
