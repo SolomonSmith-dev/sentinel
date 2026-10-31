@@ -33,6 +33,6 @@ beforeEach(async () => {
     ),
   );
   await env.DB.batch(
-    ["devices", "windows", "alerts", "ingest_log", "idempotency", "seed_marker", "row_counts"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ["devices", "windows", "alerts", "ingest_log", "idempotency", "seed_marker", "row_counts", "windows_hourly", "countries_hourly", "rollup_dirty"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
 });

@@ -6,7 +6,32 @@ import { conditional, errorResponse, intParam, jsonWithEtag } from "./http";
 type C = Context<AppEnv>;
 
 const DAY = 86_400;
+const HOUR = 3_600;
 export const SEED_IDLE_S = 15 * 60;
+
+/**
+ * Split [since, now) for the hourly rollups (migration 0004). Raw windows cover the leading partial
+ * hour [since, lead) and the last two hours [tail, now); the rollup covers whole hours [lead, b).
+ * The rollup is only trusted one hour after an hour ends, which gives the 5-minute cron time to
+ * rebuild it. Binds, in order: ?1 since, ?2 lead, ?3 b, ?4 tail.
+ */
+export function rollupBounds(since: number, t: number): [number, number, number, number] {
+  const b = Math.floor(t / HOUR) * HOUR - HOUR;
+  const lead = Math.min(Math.ceil(since / HOUR) * HOUR, b);
+  return [since, lead, b, Math.max(since, b)];
+}
+
+export const BYTES_BY_DEVICE = `SELECT device_hash, SUM(bytes) AS bytes, MAX(is_seed) AS is_seed FROM (
+    SELECT device_hash, bytes_in + bytes_out AS bytes, is_seed FROM windows WHERE ts >= ?1 AND ts < ?2
+    UNION ALL SELECT device_hash, bytes_in + bytes_out, is_seed FROM windows WHERE ts >= ?4
+    UNION ALL SELECT device_hash, bytes, is_seed FROM windows_hourly WHERE hour >= ?2 AND hour < ?3
+  ) GROUP BY device_hash`;
+
+const BYTES_BY_COUNTRY = `SELECT country, SUM(bytes) AS bytes FROM (
+    SELECT j.key AS country, j.value AS bytes FROM windows w, json_each(w.countries) j WHERE w.ts >= ?1 AND w.ts < ?2
+    UNION ALL SELECT j.key, j.value FROM windows w, json_each(w.countries) j WHERE w.ts >= ?4
+    UNION ALL SELECT country, bytes FROM countries_hourly WHERE hour >= ?2 AND hour < ?3
+  ) GROUP BY country`;
 
 /** Serve from the Cache API (10 s) when possible; ETag/304 still applies to hits. */
 async function cachedJson(c: C, compute: () => Promise<unknown>, transform?: (body: any) => unknown): Promise<Response> {
@@ -75,16 +100,17 @@ export async function devices(c: C): Promise<Response> {
   return cachedJson(c, async () => {
     const t = now();
     const { results } = await c.env.DB.prepare(
-      `SELECT d.device_hash, d.vendor, d.first_seen, d.last_seen,
+      `WITH b AS (${BYTES_BY_DEVICE})
+       SELECT d.device_hash, d.vendor, d.first_seen, d.last_seen,
          (SELECT w.score FROM windows w WHERE w.device_hash = d.device_hash ORDER BY w.ts DESC LIMIT 1) AS last_score,
          (SELECT COUNT(*) FROM alerts a WHERE a.device_hash = d.device_hash AND a.ts >= ?1) AS alerts_24h,
-         (SELECT COALESCE(SUM(w.bytes_in + w.bytes_out), 0) FROM windows w WHERE w.device_hash = d.device_hash AND w.ts >= ?1) AS bytes_24h,
+         COALESCE(b.bytes, 0) AS bytes_24h,
          d.is_seed
-       FROM devices d WHERE d.last_seen >= ?2
+       FROM devices d LEFT JOIN b ON b.device_hash = d.device_hash WHERE d.last_seen >= ?5
        ORDER BY last_score IS NULL, last_score DESC, d.device_hash
        LIMIT 500`,
     )
-      .bind(t - DAY, t - 7 * DAY)
+      .bind(...rollupBounds(t - DAY, t), t - 7 * DAY)
       .all();
     return { devices: results };
   });
@@ -94,17 +120,14 @@ export async function top(c: C): Promise<Response> {
   return cachedJson(c, async () => {
     const minutes = intParam(c.req.query("minutes"), 60, 5, 1440);
     const since = Math.floor(now() / 60) * 60 - (minutes - 1) * 60;
+    const bounds = rollupBounds(since, now());
     const [devs, countries] = await c.env.DB.batch<Record<string, unknown>>([
       c.env.DB.prepare(
-        `SELECT w.device_hash, COALESCE(d.vendor, 'Unknown') AS vendor, SUM(w.bytes_in + w.bytes_out) AS bytes, MAX(w.is_seed) AS is_seed
-         FROM windows w LEFT JOIN devices d ON d.device_hash = w.device_hash
-         WHERE w.ts >= ? GROUP BY w.device_hash ORDER BY bytes DESC LIMIT 10`,
-      ).bind(since),
-      c.env.DB.prepare(
-        `SELECT j.key AS country, SUM(j.value) AS bytes
-         FROM windows w, json_each(w.countries) j
-         WHERE w.ts >= ? GROUP BY j.key ORDER BY bytes DESC LIMIT 10`,
-      ).bind(since),
+        `WITH b AS (${BYTES_BY_DEVICE})
+         SELECT b.device_hash, COALESCE(d.vendor, 'Unknown') AS vendor, b.bytes, b.is_seed
+         FROM b LEFT JOIN devices d ON d.device_hash = b.device_hash ORDER BY b.bytes DESC LIMIT 10`,
+      ).bind(...bounds),
+      c.env.DB.prepare(`${BYTES_BY_COUNTRY} ORDER BY bytes DESC LIMIT 10`).bind(...bounds),
     ]);
     return { minutes, devices: devs!.results, countries: countries!.results };
   });

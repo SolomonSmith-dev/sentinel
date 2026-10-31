@@ -314,6 +314,8 @@ ON CONFLICT(id) DO UPDATE SET
   type = excluded.type, device_hash = excluded.device_hash, ts = excluded.ts, severity = excluded.severity,
   detail = excluded.detail, is_seed = excluded.is_seed, received_at = excluded.received_at`;
 
+const DIRTY_MARK = `INSERT INTO rollup_dirty (hour) SELECT j.value FROM json_each(?1) j WHERE true ON CONFLICT(hour) DO NOTHING`;
+
 export interface RowSet {
   devices: { device_hash: string; vendor: string; first_seen: number }[];
   windows: Batch["windows"];
@@ -353,6 +355,9 @@ export function buildRowStatements(db: D1Database, rows: RowSet, receivedAt: num
     // countries and detail are stored as JSON text, so pre-serialize them as strings.
     const wins = rows.windows.map((w) => ({ ...w, ts: clampBucket(w.ts), countries: JSON.stringify(w.countries) }));
     stmts.push(db.prepare(WINDOW_UPSERT).bind(JSON.stringify(wins), rows.isSeed, receivedAt, rows.sensorId));
+    // Hours the cron must re-roll into windows_hourly / countries_hourly (see migration 0004).
+    const hours = [...new Set(wins.map((w) => Math.floor(w.ts / 3600) * 3600))];
+    stmts.push(db.prepare(DIRTY_MARK).bind(JSON.stringify(hours)));
   }
   if (rows.alerts.length > 0) {
     const als = rows.alerts.map((x) => ({ ...x, ts: clamp(x.ts), detail: JSON.stringify(x.detail) }));
