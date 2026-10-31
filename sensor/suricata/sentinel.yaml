@@ -7,6 +7,20 @@
 stats:
   enabled: no
 
+# Bound flow state and share rule contexts on the memory-limited sensor.
+detect:
+  profile: low
+  sgh-mpm-context: single
+flow:
+  memcap: 32mb
+  prealloc: 1024
+stream:
+  memcap: 32mb
+  prealloc-sessions: 256
+  reassembly:
+    memcap: 64mb
+max-pending-packets: 256
+
 outputs:
   - fast:
       enabled: no
@@ -42,3 +56,12 @@ af-packet:
 
 threading:
   set-cpu-affinity: no
+
+# Operational logs use Docker stdout retention, not another unbounded file.
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: no

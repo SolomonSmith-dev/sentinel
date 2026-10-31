@@ -1,0 +1,7 @@
+# Public Cloudflare Access audience ID, not an authentication credential.
+16ffc6ba765764613645a9feddf8f3fb9513858c:api/wrangler.jsonc:generic-api-key:35
+# Audit prose: the scanner matched the words "body/decompression".
+14a8ac799050f88a64449db686067cc56c56424d:docs/security_audit_2026-10-31.md:generic-api-key:61
+# Cloudflare Access application resource UUIDs, not tokens or credentials.
+646d094d8885015600d797acd819952e57ef866a:STATUS.md:generic-api-key:13
+646d094d8885015600d797acd819952e57ef866a:STATUS.md:generic-api-key:14

@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { refreshRowCounts } from "../src/cron";
 import { env, fetchWorker, nowS, postIngest, sampleBatch } from "./helpers";
 
 async function getJson(path: string) {
   const res = await fetchWorker(path);
   expect(res.status).toBe(200);
   expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]+"$/);
-  expect(res.headers.get("cache-control")).toBe("public, max-age=10");
+  expect(res.headers.get("cache-control")).toBe((path === "/api/health" ? "public, max-age=10" : "private, no-store"));
   return { res, body: await res.json<any>() };
 }
 
@@ -114,6 +115,8 @@ describe("read endpoints", () => {
     expect(empty.seed_active).toBe(true);
     await postIngest("{}", { token: "bad" });
     await postIngest(JSON.stringify(sampleBatch()));
+    await refreshRowCounts(env, nowS());
+    await (caches as unknown as { default: Cache }).default.delete(new Request("https://sentinel.test/api/metrics"));
     const { body } = await getJson("/api/metrics?t=full");
     expect(body).toEqual({
       ingest: {
@@ -154,9 +157,29 @@ describe("read endpoints", () => {
     await new Promise((r) => setTimeout(r, 50));
     const second = await (await fetchWorker(p)).json<any>();
     expect(second.devices).toHaveLength(0);
-    const uncached = await (await fetchWorker("/api/top?t=cache2")).json<any>();
+    const bypass = await (await fetchWorker("/api/top?t=cache2")).json<any>();
+    expect(bypass.devices).toHaveLength(0);
+    const uncached = await (await fetchWorker("/api/top?minutes=5")).json<any>();
     expect(uncached.devices).toHaveLength(1);
   });
+
+  it.each(["flows", "top", "alerts", "devices", "metrics"])(
+    "%s ignores unknown query parameters and equivalent defaults in cache keys",
+    async (endpoint) => {
+      await (await fetchWorker(`/api/${endpoint}`)).arrayBuffer();
+      await new Promise((r) => setTimeout(r, 50));
+      const prepare = vi.spyOn(env.DB, "prepare");
+      try {
+        const defaults = endpoint === "flows" || endpoint === "top" ? "minutes=060" : "limit=50&since=0";
+        const res = await fetchWorker(`/api/${endpoint}?${defaults}&x=random&x=other`);
+        expect(res.status).toBe(200);
+        await res.arrayBuffer();
+        expect(prepare).not.toHaveBeenCalled();
+      } finally {
+        prepare.mockRestore();
+      }
+    },
+  );
 
   it("/api/metrics, /api/flows, /api/alerts are cached 10 s and a hit does not touch D1", async () => {
     const real = env.DB;
@@ -167,7 +190,7 @@ describe("read endpoints", () => {
       const batchSpy = vi.spyOn(real, "batch");
       const second = await fetchWorker(p);
       expect(second.status, p).toBe(200);
-      expect(second.headers.get("cache-control"), p).toBe("public, max-age=10");
+      expect(second.headers.get("cache-control"), p).toBe("private, no-store");
       await second.arrayBuffer();
       expect(spy, p).not.toHaveBeenCalled();
       expect(batchSpy, p).not.toHaveBeenCalled();
@@ -181,4 +204,53 @@ describe("read endpoints", () => {
     const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM idempotency").first<{ n: number }>();
     expect(r!.n).toBe(1);
   });
+});
+
+
+it("shares the alert database snapshot across distinct cursors and limits", async () => {
+  await postIngest(JSON.stringify(sampleBatch()));
+  const first = await getJson("/api/alerts");
+  const ts = first.body.alerts[0].ts;
+  await new Promise((r) => setTimeout(r, 50));
+  const spy = vi.spyOn(env.DB, "prepare");
+  try {
+    for (const since of [0, 1, ts - 1, ts, ts + 1]) {
+      const { body } = await getJson(`/api/alerts?since=${since}&limit=1`);
+      expect(body.alerts).toHaveLength(since < ts ? 1 : 0);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  } finally { spy.mockRestore(); }
+});
+
+it("rate limits public readers without writing rejection logs", async () => {
+  let res: Response | undefined;
+  for (let i = 0; i < 121; i++) res = await fetchWorker("/api/devices", { headers: { "cf-connecting-ip": "198.51.100.200" } });
+  expect(res!.status).toBe(429);
+  expect(res!.headers.get("retry-after")).toBe("60");
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ingest_log").first()).toEqual({ n: 0 });
+});
+
+
+it("blocks all telemetry before cache lookup when reads are disabled", async () => {
+  await fetchWorker("/api/devices");
+  const original = env.TELEMETRY_READS_ENABLED;
+  env.TELEMETRY_READS_ENABLED = "false";
+  try {
+    for (const path of ["devices", "alerts", "flows", "top", "metrics"]) {
+      const res = await fetchWorker(`/api/${path}`);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    }
+    expect((await fetchWorker("/api/health")).status).toBe(200);
+  } finally { env.TELEMETRY_READS_ENABLED = original; }
+});
+
+
+it("rejects a cold read before D1 when the shared miss budget is exhausted", async () => {
+  const limiter = vi.spyOn(env.READ_MISS_LIMITER, "limit").mockResolvedValue({ success: false });
+  const database = vi.spyOn(env.DB, "prepare");
+  try {
+    expect((await fetchWorker("/api/devices")).status).toBe(429);
+    expect(database).not.toHaveBeenCalled();
+  } finally { limiter.mockRestore(); database.mockRestore(); }
 });

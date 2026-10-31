@@ -76,11 +76,11 @@ Field rules
 
 Success: 200 `{"status":"ok","windows":N,"alerts":N,"devices":N,"request_id":"..."}`.
 
-Privacy guard: before parsing fields, the Worker scans the decompressed body for IPv4 (`\b(?:\d{1,3}\.){3}\d{1,3}\b`), MAC (`\b[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}\b`) and IPv6-looking tokens. Any match → 400 `pii_rejected`. The sensor runs the same check before sending.
+Privacy guard: the Worker scans both decompressed JSON text and decoded content for IPv4, MAC and IPv6-looking tokens, plus local DNS names under `.local`, `.lan`, `.home`, `.internal`, `.localhost`, and `.home.arpa` (case insensitive). Any match returns 400 `pii_rejected`. The sensor uses matching patterns and redacts Suricata text before sending. Arbitrary single-label hostnames and custom/public suffixes cannot reliably be identified from free text. Shared classification vectors live in `api/test/pii-vectors.json`.
 
 ## Read endpoints
 
-All are public, `GET`, JSON, and send `ETag` and `Cache-Control: public, max-age=10`. `If-None-Match` matching → 304. Worker caches `/api/top` and `/api/devices` for 10 s with the Cache API.
+Telemetry reads require an owner Cloudflare Access session. They return JSON with `ETag` and `Cache-Control: private, no-store`. Matching `If-None-Match` returns 304 after authentication. The Worker caches internal read snapshots for 10 seconds; browsers do not cache telemetry. `/api/health` contains no telemetry.
 
 ### GET /api/flows?minutes=60
 `minutes` in [5, 1440], default 60. Per-minute totals across all devices.
@@ -118,6 +118,11 @@ Top 10 of each by total bytes.
 ```
 The Worker records each ingest attempt (status, duration ms) in `ingest_log`. `sensor` is null until a real sensor has posted.
 
+`rows` is a snapshot refreshed after each successful cron run (normally every five minutes),
+not a live count. Authenticated requests read one snapshot row instead of scanning telemetry tables.
+Until the first snapshot exists, counts are zero. Unknown query parameters are ignored by
+read-cache keys; supported numeric parameters are clamped and normalized before caching.
+
 ### GET /api/health
 `{"ok": true}`. No D1 access.
 
@@ -125,9 +130,30 @@ The Worker records each ingest attempt (status, duration ms) in `ingest_log`. `s
 
 Tables: `devices`, `windows`, `alerts`, `ingest_log`, `idempotency`, `seed_marker`. Every data table has `is_seed INTEGER NOT NULL DEFAULT 0` and `received_at INTEGER NOT NULL`.
 
+Migration `0003_row_counts.sql` adds the singleton `row_counts` snapshot and initializes it
+from existing data. Apply this migration before deploying the updated Worker. Cron refreshes
+still scan the three telemetry tables; the scan frequency is bounded independently of traffic.
+
 ## Cron
 
 - `*/5 * * * *` seed top-up: if no real (non-seed) window arrived in the last 15 minutes, insert seed windows for the minutes missing since the last seed write (8 synthetic devices, plausible diurnal traffic, an occasional seed alert). Keeps the URL live-looking without a sensor. Stops writing once real data flows.
 - `17 3 * * *` prune: delete real rows older than 7 days, seed rows older than 24 h, `idempotency` and `ingest_log` rows older than 24 h.
 
 Free-tier budget: D1 allows 100k rows written per day, and every index entry counts as a row written (measured: the 24 h seed backfill cost 57.8k row-writes for 11.6k rows). `windows` therefore carries a single secondary index. The sensor never ships a window with `pkts == 0` and sends a device in `devices` only when it is new or was last sent more than 10 minutes ago. A LAN with 20 devices active at once stays near 60k row-writes a day; seed top-up stops once real data flows.
+
+Read protection: telemetry GETs allow 120 requests per minute per client IP. Cache misses additionally share a 120/minute budget per Cloudflare location (best effort, not a global billing cap). Alert cursors and limits filter a shared latest-200, seven-day snapshot without extra D1 reads. Rate-limited responses use 429, Retry-After: 60 and no-store.
+
+
+## Private dashboard access
+
+Telemetry is no longer public. Cloudflare Access protects the entire hostname
+with an exact-email allow policy for the owner and one-time PIN login.
+`/api/ingest` has a separate, exact-path Access exception because it authenticates
+with the existing Worker bearer token. This exception does not grant read access.
+The Worker independently verifies Access JWT signature, RS256 algorithm, issuer,
+audience, expiry, required identity claims, token type and the owner's email
+before any telemetry cache lookup. Missing configuration fails closed.
+`TELEMETRY_READS_ENABLED=false` is an emergency read kill switch, not an auth bypass.
+Telemetry browser responses are `private, no-store`; only the internal edge
+snapshot is cached. Existing copies already retrieved before access was restricted
+cannot be recalled. Ingest credentials never authenticate dashboard reads.

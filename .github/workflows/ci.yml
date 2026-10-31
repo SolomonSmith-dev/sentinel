@@ -64,7 +64,7 @@ jobs:
       - name: test
         if: hashFiles('sensor/shipper/pyproject.toml') != ''
         working-directory: sensor/shipper
-        run: pip install -e '.[dev]' && pytest -q
+        run: pip install -e '.[dev]' && pytest -q tests ../suricata/test_retention.py
 
   deploy-script:
     runs-on: ubuntu-latest

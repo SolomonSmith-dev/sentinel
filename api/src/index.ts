@@ -1,3 +1,4 @@
+import { authorizedReader } from "./access";
 import { Hono } from "hono";
 import { scheduled } from "./cron";
 import type { AppEnv, Env } from "./env";
@@ -10,6 +11,23 @@ const app = new Hono<AppEnv>();
 app.use("*", async (c, next) => {
   await next();
   c.res = withSecurityHeaders(c.res);
+  // Internal edge cache remains usable behind auth; browsers must not retain telemetry.
+  if (c.req.path.startsWith("/api/") && c.req.path !== "/api/health") {
+    c.header("cache-control", "private, no-store");
+  }
+});
+
+app.use("/api/*", async (c, next) => {
+  if (c.req.path !== "/api/health" && !(c.req.method === "POST" && c.req.path === "/api/ingest")) {
+    if (!(await authorizedReader(c.req.raw, c.env))) {
+      return errorResponse(403, "private_dashboard", "Network telemetry is private", { "cache-control": "no-store" });
+    }
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+    if (!(await c.env.READ_LIMITER.limit({ key: `read:${ip}` })).success) {
+      return errorResponse(429, "rate_limited", "Too many read requests", { "retry-after": "60", "cache-control": "no-store" });
+    }
+  }
+  await next();
 });
 
 app.post("/api/ingest", (c) => handleIngest(c.req.raw, c.env, c.executionCtx as ExecutionContext));

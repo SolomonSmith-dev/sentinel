@@ -1,3 +1,4 @@
+import { accessToken } from "./access-fixture";
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 
@@ -11,8 +12,8 @@ export function freshIp(): string {
   return `10.${(ipCounter >> 16) & 255}.${(ipCounter >> 8) & 255}.${ipCounter & 255}`;
 }
 
-export function fetchWorker(path: string, init?: RequestInit): Promise<Response> {
-  return (exports as unknown as { default: Fetcher }).default.fetch(new Request(BASE + path, init));
+export async function fetchWorker(path: string, init?: RequestInit): Promise<Response> {
+  return (exports as unknown as { default: Fetcher }).default.fetch(new Request(BASE + path, { ...init, headers: { "cf-connecting-ip": freshIp(), "cf-access-jwt-assertion": await accessToken, ...Object.fromEntries(new Headers(init?.headers)) } }));
 }
 
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {

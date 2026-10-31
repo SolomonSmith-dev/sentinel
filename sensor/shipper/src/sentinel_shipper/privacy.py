@@ -23,7 +23,13 @@ IPV6 = re.compile(
     )
 )
 
-PATTERNS: dict[str, re.Pattern[str]] = {"ipv4": IPV4, "mac": MAC, "ipv6": IPV6}
+HOSTNAME = re.compile(
+    r"(?<![a-zA-Z0-9_-])(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+"
+    r"(?:local|lan|home|internal|localhost|home\.arpa)(?![a-zA-Z0-9_-])",
+    re.IGNORECASE | re.ASCII,
+)
+
+PATTERNS: dict[str, re.Pattern[str]] = {"ipv4": IPV4, "mac": MAC, "ipv6": IPV6, "hostname": HOSTNAME}
 
 
 class PrivacyViolation(Exception):
@@ -52,7 +58,7 @@ def redact(text: str) -> str:
     # Repeat until stable: removing one match can expose another (e.g. "1.2.3.4.5.6.7.8").
     for _ in range(8):
         before = text
-        for pattern in (MAC, IPV6, IPV4):
+        for pattern in (MAC, IPV6, IPV4, HOSTNAME):
             text = pattern.sub("[redacted]", text)
         if text == before:
             break

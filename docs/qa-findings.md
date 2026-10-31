@@ -69,6 +69,25 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 
 ## 3. Findings, ranked
 
+Local follow-up verification (2026-10-30): 100 API tests, 169 shipper tests, and all
+four C++ ctest suites pass. API typecheck, dashboard production build, Compose
+validation, shellcheck, and diff whitespace checks pass. Isolated Linux-container
+smoke tests pass for capture with only NET_RAW and the hardened non-root shipper.
+Cloud deployment verified 2026-10-31: migration 0003 applied and Worker version
+373c6d97-cd2c-4d61-97d1-518bfea7f826 deployed. Public endpoints, built assets, security
+headers, ETags/304, dashboard rendering without browser warnings/errors, and the
+scheduled snapshot refresh pass. Production ingest checks now pass using an explicitly approved replacement token,
+mounted read-only with the stable salt from owner-only server files outside the
+checkout. Capture and shipper are live on home-server; repeated real uploads,
+empty queue/quarantine, privacy scans, and credential recovery after restart pass.
+All 174 shipper tests pass, including mounted-credential error handling. Suricata 8.0.7 is deployed from SHA-256-checked source with generic x86-64
+instructions because prebuilt runtime/dependencies require unavailable
+x86-64-v2/SSE4.2 instructions. All 52,939 ET Open rules load. The controlled
+SID 2100498 diagnostic reached the API and dashboard after final AC-KS tuning.
+The IDS uses about 1.3 GiB within a 1.5 GiB cap, with no swap, memory-pressure,
+or OOM events. All three services show zero automatic restarts. Dashboard version
+ce6e9794-8874-4d27-9d71-92ed506d5412 labels retained synthetic history alongside live data.
+
 ### F1 (High): every unauthenticated or rejected request costs D1 writes; the rate limiter does not bound them
 - Where: `api/src/ingest.ts:85-110` (`logAttempt`, INSERT at line 103), called from `fail()` at line 132, including the 429 path at line 140. Indexes: `api/migrations/0001_init.sql:70,72` (two on `ingest_log`).
 - What is wrong: `fail()` writes an `ingest_log` row for 401, 413, 429 and 503. Rate-limit and auth failures happen before any trust is established, so anyone can make the Worker write to D1. The limiter caps successful processing, not logging: 429 responses are logged too, so a single IP has no write cap at all, and many IPs each get 60 per minute. docs/api.md says each index entry counts as a row written, so each logged request costs about 3 row-writes (table plus two indexes). By that accounting about 33k junk requests exhaust the 100k/day free-tier write budget, after which real ingest returns 503 storage_unavailable and the seed cron stops. The failure counts shown on the public `/api/metrics` can also be inflated.
@@ -81,7 +100,7 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 - What is wrong: `/api/metrics`, `/api/flows` and `/api/alerts` are unauthenticated, uncached at the edge (the Worker runs first for `/api/*`), and `metrics` scans the whole `windows` table. D1 bills rows scanned. `/api/top` and `/api/devices` are cached, but `?x=<random>` creates a new cache key per request and forces a recompute.
 - Proof: local `windows` has 12,033 rows (seed only), and the `metrics` query counts all of them each call. Against the 5M rows-read/day free tier that is roughly 400 calls on seed data alone, and far fewer once real data accumulates (the contract budgets about 43k rows/day, so about 300k rows after a week, about 16 calls). This is an estimate from measured table size; wrangler local did not report `rows_read`, and production was not tested.
 - Fix: wrap `metrics`, `flows` and `alerts` in `cachedJson`, and build the cache key from an allowlist of known params only. Replace the three `COUNT(*)` scans with a counter maintained by the cron.
-- Fixed: `/api/metrics`, `/api/flows`, `/api/alerts` use `cachedJson` (10 s). Cache key is still the full sorted query string, so `?x=random` can still bust it; the param allowlist and cron-maintained counters from the fix list are not done.
+- Fixed: all public telemetry reads use a 10 s cache. Cache keys contain only normalized, supported parameters; unknown parameters and equivalent numeric spellings reuse entries. Metrics reads the singleton `row_counts` snapshot, refreshed after successful cron runs, normally every five minutes. Migration 0003 initializes the snapshot. Scheduled refreshes still scan telemetry tables, so the bounded cron read cost remains a capacity consideration.
 
 ### F3 (Medium): shipper and Worker privacy regexes disagree; a benign signature quarantines a whole batch
 - Where: `sensor/shipper/src/sentinel_shipper/privacy.py:11-12` (`\b` boundaries) versus `api/src/ingest.ts:15-18` (lookbehind on digits or hex). `redact()` (`privacy.py:45`) uses the shipper's weaker patterns on Suricata signature and category (`eve.py:88,90`).
@@ -101,13 +120,13 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 - Where: `api/src/ingest.ts:55` (`JSON.stringify(d).length <= 2048`).
 - What is wrong: the contract says 2 KB serialized. Emoji count as 2 units for 4 bytes, so about 4 KB of UTF-8 is accepted. Bounded by the 256 KB body cap, so impact is small storage bloat from a token holder.
 - Proof: 1000 emoji in `detail.k` returned 200 ok.
-- Fix: compare `new TextEncoder().encode(JSON.stringify(d)).length`.
+- Fixed: compare UTF-8 byte length using `TextEncoder`. API tests cover ASCII and emoji at 2048 bytes, one byte over, and multibyte text over the cap.
 
 ### F6 (Low): no guard for hostnames in the ingest body
 - Where: `api/src/ingest.ts:11-28` (`containsPii` covers IPv4, MAC, IPv6 only).
 - What is wrong: the README says no hostname leaves the house, but nothing enforces it at the Worker. The shipper code never builds a hostname (grep of `sensor/shipper/src` found none), so today it holds; free-text fields (`detail`, `vendor`) from a future code change would pass silently.
 - Proof: a `detail` value of `johns-macbook.local` returned 200 and was stored.
-- Fix: restrict `detail` to a per-type schema (keys and value types), and cap `vendor` to a known-vendor pattern. This also removes the free-form text surface.
+- Fixed for the demonstrated local-DNS leak: matching Worker and shipper guards reject names under `.local`, `.lan`, `.home`, `.internal`, `.localhost`, and `.home.arpa`. Suricata text is redacted before shipping. Shared vectors and upload tests cover uppercase names, JSON escapes, and rejection before telemetry writes. Arbitrary single-label hostnames and names under custom/public suffixes cannot reliably be inferred from free text; per-type detail schemas remain a possible stricter future contract.
 
 ### F7 (Low): ancient timestamps accepted
 - Where: `api/src/ingest.ts:293-294` (clamp is upper-bound only).
@@ -128,7 +147,7 @@ Cleanup: both dev servers killed (ports 8798 and 8799 verified free, no wrangler
 - What is wrong: `sentinel-capture` adds NET_ADMIN, but the image only grants `cap_net_raw+ep` (`sensor/capture/Dockerfile`) and libpcap capture needs only NET_RAW. No service sets `cap_drop: [ALL]`, `read_only: true` or `security_opt: [no-new-privileges]`. The shipper (the only service that talks to the internet) runs non-root but with default capabilities.
 - Proof: read of the compose file and Dockerfiles only; not exercised at runtime.
 - Fix: drop NET_ADMIN from capture; add `cap_drop: [ALL]` plus `read_only: true` and `no-new-privileges` to the shipper. (Do not set no-new-privileges on capture, it blocks the file capability.) Suricata's NET_ADMIN, NET_RAW and SYS_NICE match its published requirements.
-- Partly fixed: `no-new-privileges` on capture and shipper; shipper also `read_only` with tmpfs `/tmp` (smoke run starts and fails only on missing token/salt). Capture still ran under no-new-privileges on Docker Desktop, but not tested on the Debian host. NET_ADMIN not dropped from capture and no `cap_drop` added (not requested).
+- Fixed: capture drops all capabilities then adds only NET_RAW. It omits no-new-privileges so its non-root binary can acquire its NET_RAW file capability on Linux. Shipper drops all capabilities and retains no-new-privileges, a read-only root, and writable `/tmp` tmpfs. Local Linux-container smoke tests verified capture on isolated loopback and shipper effective capabilities/uid/no-new-privileges. The Debian deployment now runs with these settings; live capture, uploads, and the IDS alert path pass. The mounted-credential shipper has an empty queue/quarantine and resumes uploads after a controlled restart.
 
 ### Checked, no finding
 - IP/MAC/hostname paths to the cloud: the capture-to-shipper file is local; the shipper emits only `device_hash`, country codes, counts and (redacted) signature, sid, category. Alert details in `rules.py` carry counts and country codes. Eve source and destination IPs are resolved to a hash and dropped (`eve.py:158`). Logs: `main.py:37` prints settings via a repr that hides token, salt and WAN IP; nothing logs window contents. The sender runs the privacy guard on the final bytes before every send.

@@ -24,8 +24,11 @@ const IPV6_RE = new RegExp(
   ].join("|"),
 );
 
+// Local DNS names can identify household devices even without an address.
+const HOSTNAME_RE = /(?<![a-zA-Z0-9_-])(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+(?:local|lan|home|internal|localhost|home\.arpa)(?![a-zA-Z0-9_-])/i;
+
 export function containsPii(text: string): boolean {
-  return IPV4_RE.test(text) || MAC_RE.test(text) || IPV6_RE.test(text);
+  return IPV4_RE.test(text) || MAC_RE.test(text) || IPV6_RE.test(text) || HOSTNAME_RE.test(text);
 }
 
 const deviceHash = z.string().regex(/^dev-[0-9a-f]{6}$/);
@@ -53,7 +56,7 @@ const AlertSchema = z.object({
   severity: z.enum(["low", "medium", "high", "critical"]),
   detail: z
     .record(z.string(), z.unknown())
-    .refine((d) => JSON.stringify(d).length <= 2048, "detail over 2 KB"),
+    .refine((d) => new TextEncoder().encode(JSON.stringify(d)).byteLength <= 2048, "detail over 2 KB"),
 });
 
 const DeviceSchema = z.object({
@@ -235,7 +238,6 @@ export async function handleIngest(req: Request, env: Env, ctx: ExecutionContext
   }
   if (json && typeof json === "object") {
     const o = json as Record<string, unknown>;
-    if (typeof o.sensor_id === "string") a.sensorId = o.sensor_id.slice(0, 64);
     const len = (k: string) => (Array.isArray(o[k]) ? (o[k] as unknown[]).length : 0);
     if (len("windows") > MAX_WINDOWS || len("alerts") > MAX_ALERTS || len("devices") > MAX_DEVICES) {
       return fail(400, "too_many_items", `At most ${MAX_WINDOWS} windows, ${MAX_ALERTS} alerts, ${MAX_DEVICES} devices per batch`);

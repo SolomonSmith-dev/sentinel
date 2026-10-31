@@ -81,6 +81,12 @@ describe("seed top-up cron", () => {
     const ctrl = createScheduledController({ scheduledTime: Date.now(), cron: "*/5 * * * *" });
     await worker.scheduled(ctrl, env);
     expect(await n("SELECT COUNT(*) AS n FROM windows WHERE is_seed = 1")).toBeGreaterThan(0);
+    const counts = await env.DB.prepare("SELECT devices, windows, alerts FROM row_counts WHERE id = 1").first();
+    expect(counts).toEqual({
+      devices: await n("SELECT COUNT(*) AS n FROM devices"),
+      windows: await n("SELECT COUNT(*) AS n FROM windows"),
+      alerts: await n("SELECT COUNT(*) AS n FROM alerts"),
+    });
   });
 });
 
@@ -110,6 +116,7 @@ describe("prune cron", () => {
     ]);
     const ctrl = createScheduledController({ scheduledTime: t * 1000, cron: "17 3 * * *" });
     await worker.scheduled(ctrl, env);
+    expect(await env.DB.prepare("SELECT devices, windows, alerts FROM row_counts WHERE id = 1").first()).toEqual({ devices: 1, windows: 2, alerts: 1 });
     expect(await n("SELECT COUNT(*) AS n FROM windows WHERE is_seed = 0")).toBe(1);
     expect(await n("SELECT COUNT(*) AS n FROM windows WHERE is_seed = 1")).toBe(1);
     expect((await env.DB.prepare("SELECT id FROM alerts ORDER BY id").all()).results).toEqual([{ id: "a2" }]);

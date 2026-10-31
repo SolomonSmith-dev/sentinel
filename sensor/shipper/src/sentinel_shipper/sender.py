@@ -62,7 +62,7 @@ class Sender:
     sent_ok: int = 0
 
     def backoff(self, retry_after: float | None = None) -> float:
-        delay = self.rng.uniform(0, min(BACKOFF_CAP_S, BACKOFF_BASE_S * (2 ** self.attempt)))
+        delay = self.rng.uniform(0, min(BACKOFF_CAP_S, BACKOFF_BASE_S * (2 ** min(self.attempt, 10))))
         if retry_after is not None:
             delay = max(delay, min(retry_after, BACKOFF_CAP_S))
         self.attempt += 1
@@ -121,6 +121,10 @@ class Sender:
             return "retry"
 
         status, code = resp.status_code, _error_code(resp)
+        if status in {301, 302, 303, 307, 308, 403} or (status == 200 and code not in {"ok", "duplicate"}):
+            delay = self.backoff()
+            log.error("ingest authentication/proxy response %d; preserving batch, retry in %.1f s", status, delay)
+            return "retry"
         if status == 200:
             self.queue.remove(item)
             self.attempt = 0

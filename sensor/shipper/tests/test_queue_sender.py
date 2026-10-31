@@ -148,6 +148,38 @@ def test_network_error_retries(tmp_path):
 
 
 @respx.mock
+def test_lost_response_then_restart_preserves_retry_identity(tmp_path):
+    # Model an accepted upload whose response never reaches the sender.
+    route = respx.post(URL).mock(side_effect=[
+        httpx.ReadTimeout("response lost after acceptance"),
+        httpx.Response(200, json={"status": "duplicate"}),
+    ])
+    clock = Clock()
+    sender = make_sender(tmp_path, clock)
+    sender.queue.put(body(1), now=clock.t)
+
+    assert sender.drain() == 0
+    assert len(sender.queue) == 1
+    first_request = route.calls[0].request
+    first_raw = gzip.decompress(first_request.content)
+    first_key = first_request.headers["Idempotency-Key"]
+    sender.client.close()
+
+    # A fresh sender has no memory of the first attempt; only disk survives.
+    clock.t += 60
+    restarted = make_sender(tmp_path, clock)
+    with restarted.client:
+        assert len(restarted.queue) == 1
+        assert restarted.drain() == 1
+
+    retry_request = route.calls[1].request
+    assert gzip.decompress(retry_request.content) == first_raw
+    assert retry_request.headers["Idempotency-Key"] == first_key
+    assert route.call_count == 2
+    assert len(restarted.queue) == 0
+
+
+@respx.mock
 def test_duplicate_is_success(tmp_path):
     respx.post(URL).mock(return_value=httpx.Response(200, json={"status": "duplicate"}))
     s = make_sender(tmp_path)
@@ -190,6 +222,7 @@ def test_401_keeps_batch(tmp_path):
 
 @respx.mock
 @pytest.mark.parametrize("leak,wan", [("192.168.1.20", None), ("a4:83:e7:12:34:56", None),
+                                      ("johns-macbook.local", None),
                                       ("81.2.69.160", "81.2.69.160")])
 def test_privacy_guard_blocks_send(tmp_path, caplog, leak, wan):
     route = respx.post(URL).mock(return_value=httpx.Response(200, json={"status": "ok"}))
@@ -217,3 +250,21 @@ def test_token_never_logged(tmp_path, caplog):
     clock.t = s.next_attempt_at
     s.drain()
     assert TOKEN not in caplog.text and TOKEN not in repr(s)
+
+
+@respx.mock
+@pytest.mark.parametrize("status", [200, 301, 302, 303, 307, 308, 403])
+def test_proxy_login_response_preserves_batch(tmp_path, status):
+    respx.post(URL).mock(return_value=httpx.Response(status, text="<html>Sign in</html>"))
+    s = make_sender(tmp_path)
+    s.queue.put(body(1))
+    assert s.drain() == 0
+    assert len(s.queue) == 1
+    assert not list(s.queue.quarantine_dir.glob("*.json"))
+    assert s.next_attempt_at > s.clock()
+
+
+def test_prolonged_outage_backoff_stays_bounded(tmp_path):
+    s = make_sender(tmp_path)
+    s.attempt = 10000
+    assert 0 <= s.backoff() <= 300

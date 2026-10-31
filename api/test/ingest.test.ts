@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { containsPii } from "../src/ingest";
 import vectors from "./pii-vectors.json";
 import { env, fetchWorker, gzip, nowS, postIngest, sampleBatch, sha256Hex } from "./helpers";
@@ -10,6 +10,26 @@ async function count(table: string): Promise<number> {
 
 // Same vectors as sensor/shipper/tests/test_geo_anon_privacy.py: shipper and Worker must agree.
 describe("privacy vectors shared with the shipper", () => {
+  it.each(["johns-macbook.local", "PRINTER.LAN", "nas.home.arpa"])(
+    "rejects local hostname %s in values and escaped JSON", async (hostname) => {
+      const batch = sampleBatch({ devices: [{ device_hash: "dev-3fa91c", vendor: hostname, first_seen: nowS() }] });
+      const text = JSON.stringify(batch).replace(hostname, hostname.replaceAll(".", "\\u002e"));
+      const res = await postIngest(text);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+      expect(await count("devices")).toBe(0);
+    },
+  );
+  it("rejects a local hostname in alert details before any telemetry is stored", async () => {
+    const batch = sampleBatch({ alerts: [{
+      ...sampleBatch().alerts[0]!, detail: { signature: "ET INFO johns-macbook.local" },
+    }] });
+    const res = await postIngest(JSON.stringify(batch));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "pii_rejected" });
+    expect(await count("windows")).toBe(0);
+    expect(await count("alerts")).toBe(0);
+  });
   it.each(vectors.map((v) => [v.text, v.pii] as const))("containsPii(%j) = %s", (text, pii) => {
     expect(containsPii(text)).toBe(pii);
   });
@@ -24,6 +44,21 @@ describe("privacy vectors shared with the shipper", () => {
 });
 
 describe("POST /api/ingest", () => {
+  it.each([
+    ["ASCII at the limit", "a".repeat(2040), 200],
+    ["ASCII over the limit", "a".repeat(2041), 400],
+    ["emoji at the limit", "😀".repeat(510), 200],
+    ["emoji over the limit", "😀".repeat(510) + "a", 400],
+    ["multibyte text over the limit", "界".repeat(681), 400],
+  ])("enforces serialized UTF-8 detail size: %s", async (_label, value, status) => {
+    const batch = sampleBatch({
+      alerts: [{ ...sampleBatch().alerts[0]!, detail: { k: value } }],
+    });
+    const res = await postIngest(JSON.stringify(batch));
+    expect(res.status).toBe(status);
+    expect(await count("alerts")).toBe(status === 200 ? 1 : 0);
+  });
+
   it("401 without a token", async () => {
     const res = await postIngest(JSON.stringify(sampleBatch()), { token: null });
     expect(res.status).toBe(401);
@@ -263,5 +298,22 @@ describe("POST /api/ingest", () => {
     const res = await fetchWorker("/api/nope");
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "not_found" });
+  });
+});
+
+
+describe("rejected identifier privacy", () => {
+  it.each([false, true])("does not log escaped identifiers (over item cap: %s)", async (overCap) => {
+    const spy = vi.spyOn(console, "log");
+    try {
+      const body = JSON.stringify(sampleBatch({ sensor_id: "192.0.2.1",
+        ...(overCap ? { windows: Array(501).fill({}) } : {}),
+      })).replace("192.0.2.1", "192\\u002e0\\u002e2\\u002e1");
+      const response = await postIngest(body);
+      expect(response.status).toBe(400);
+      await expect.poll(async () => count("ingest_log")).toBe(1);
+      expect(await env.DB.prepare("SELECT sensor_id FROM ingest_log").first()).toEqual({ sensor_id: null });
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("192.0.2.1");
+    } finally { spy.mockRestore(); }
   });
 });

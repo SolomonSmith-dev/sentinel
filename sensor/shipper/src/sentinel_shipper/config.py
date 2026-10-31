@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlsplit
 
 
 class ConfigError(ValueError):
@@ -43,8 +44,19 @@ class Settings:
                 return default
             return value.strip()
 
-        token = get("SENTINEL_TOKEN")
-        salt = get("SENTINEL_SALT")
+        def secret(name: str) -> str | None:
+            value, filename = get(name), get(name + "_FILE")
+            if value and filename:
+                raise ConfigError(f"set only one of {name} and {name}_FILE")
+            if filename:
+                try:
+                    return Path(filename).read_text(encoding="utf-8").strip() or None
+                except (OSError, UnicodeError):
+                    raise ConfigError(f"cannot read {name}_FILE") from None
+            return value
+
+        token = secret("SENTINEL_TOKEN")
+        salt = secret("SENTINEL_SALT")
         missing = [n for n, v in (("SENTINEL_TOKEN", token), ("SENTINEL_SALT", salt)) if not v]
         if missing:
             raise ConfigError(
@@ -54,8 +66,15 @@ class Settings:
             )
         api = get("SENTINEL_API", "https://sentinel.solomonsmith.dev")
         assert api is not None and token is not None and salt is not None
-        if not api.startswith(("https://", "http://")):
-            raise ConfigError("SENTINEL_API must be an http(s) URL")
+        try:
+            endpoint = urlsplit(api)
+            valid_port = endpoint.port is None or 1 <= endpoint.port <= 65535
+        except ValueError:
+            raise ConfigError("SENTINEL_API must be a valid HTTPS URL") from None
+        if (endpoint.scheme != "https" or not endpoint.hostname or not valid_port
+                or endpoint.username is not None or endpoint.password is not None
+                or endpoint.query or endpoint.fragment):
+            raise ConfigError("SENTINEL_API must use HTTPS without credentials, query or fragment")
         retrain_at = get("SENTINEL_RETRAIN_AT", "03:30") or "03:30"
         _parse_hhmm(retrain_at)
         return cls(

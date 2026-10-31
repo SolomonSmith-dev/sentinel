@@ -120,6 +120,7 @@ def test_tailer_handles_rotation(tmp_path):
     t.read()
     t.commit()
     os.rename(eve, tmp_path / "eve.json.1")  # logrotate: move, then create new file
+    os.utime(tmp_path / "eve.json.1", (1, 1))
     eve.write_text(eve_line(sid=10) + eve_line(sid=11) + eve_line(sid=12))  # new inode, longer
     assert [e.sid for e in t.read()] == [10, 11, 12]
 
@@ -155,3 +156,49 @@ def test_rollup_drops_idle_buckets(geo):
     busy = make_window(window_start=T0 + 60)
     out = rollup([("dev-aaaaaa", idle, 0.4), ("dev-aaaaaa", busy, None)], geo)
     assert [w["ts"] for w in out] == [T0 + 60]
+
+
+def test_rotation_preserves_unread_records_across_restart(tmp_path):
+    eve, state = tmp_path / "eve.json", tmp_path / "offset.json"
+    eve.write_text(eve_line(sid=1))
+    reader = EveTailer(eve, state, start_at_end=False)
+    reader.read(); reader.commit()
+    with eve.open("a") as f:
+        f.write(eve_line(sid=2))
+    old = tmp_path / "eve.json.0001"
+    eve.rename(old)
+    os.utime(old, (1, 1))
+    eve.write_text(eve_line(sid=3))
+    reader = EveTailer(eve, state)
+    assert [e.sid for e in reader.read()] == [2]
+    # No commit: a restart must replay the archived unread record.
+    reader = EveTailer(eve, state)
+    assert [e.sid for e in reader.read()] == [2]
+    reader.commit()
+    assert [e.sid for e in reader.read()] == [3]
+    reader.commit()
+    assert reader.read() == []
+
+
+def test_missing_archive_warns_before_resuming(tmp_path, caplog):
+    eve, state = tmp_path / "eve.json", tmp_path / "offset.json"
+    eve.write_text(eve_line(sid=1))
+    state.write_text('{"inode": -1, "offset": 100}')
+    reader = EveTailer(eve, state)
+    assert [e.sid for e in reader.read()] == [1]
+    assert "may have lost unread alerts" in caplog.text
+
+
+def test_archived_partial_record_does_not_block_new_file(tmp_path, caplog):
+    eve, state = tmp_path / "eve.json", tmp_path / "offset.json"
+    eve.write_text(eve_line(sid=1))
+    reader = EveTailer(eve, state, start_at_end=False)
+    reader.read(); reader.commit()
+    with eve.open("a") as f: f.write('{"partial":')
+    old = tmp_path / "eve.json.0001"
+    eve.rename(old); os.utime(old, (1, 1))
+    eve.write_text(eve_line(sid=2))
+    assert reader.read() == []
+    reader.commit()
+    assert [e.sid for e in reader.read()] == [2]
+    assert "incomplete final" in caplog.text

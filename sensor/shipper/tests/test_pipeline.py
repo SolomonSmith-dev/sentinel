@@ -146,6 +146,31 @@ def test_config_defaults_and_repr_hide_secrets():
     assert "tok-fake-123" not in r and "salt-fake-456" not in r and "81.2.69.160" not in r
 
 
+def test_config_loads_mounted_credentials(tmp_path):
+    token, salt = tmp_path / "token", tmp_path / "salt"
+    token.write_text("test-mounted-token\n")
+    salt.write_text("test-mounted-salt\n")
+    s = Settings.from_env({"SENTINEL_TOKEN_FILE": str(token), "SENTINEL_SALT_FILE": str(salt)})
+    assert s.token == "test-mounted-token" and s.salt == "test-mounted-salt"
+    assert s.token not in repr(s) and s.salt not in repr(s)
+
+
+def test_config_rejects_ambiguous_credentials(tmp_path):
+    with pytest.raises(ConfigError, match="set only one"):
+        Settings.from_env({"SENTINEL_TOKEN": "test-token", "SENTINEL_TOKEN_FILE": str(tmp_path / "token")})
+
+
+@pytest.mark.parametrize("content", [None, "  ", b"\xff"])
+def test_config_rejects_unusable_credential_file(tmp_path, content):
+    token = tmp_path / "token"
+    if isinstance(content, bytes):
+        token.write_bytes(content)
+    elif content is not None:
+        token.write_text(content)
+    with pytest.raises(ConfigError, match="SENTINEL_TOKEN"):
+        Settings.from_env({"SENTINEL_TOKEN_FILE": str(token), "SENTINEL_SALT": "test-salt"})
+
+
 def test_main_exits_without_config(monkeypatch, capsys):
     from sentinel_shipper.main import main
     monkeypatch.delenv("SENTINEL_TOKEN", raising=False)
@@ -212,3 +237,13 @@ def test_idle_device_window_not_shipped(tmp_path, geo, oui):
     # its new_device alert still ships, so it is listed
     assert idle_dh in {a["device_hash"] for a in body["alerts"]}
     p.state.close()
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://example.com", "http://127.0.0.1:8080", "http://[::1]:8080",
+    "https://", "https://example.com:bad", "https://user:password@example.com",
+    "https://example.com?token=x", "https://example.com#fragment", "https://[broken",
+])
+def test_config_rejects_insecure_or_ambiguous_endpoint(endpoint):
+    with pytest.raises(ConfigError, match="HTTPS"):
+        Settings.from_env({"SENTINEL_TOKEN": "fake", "SENTINEL_SALT": "fake", "SENTINEL_API": endpoint})

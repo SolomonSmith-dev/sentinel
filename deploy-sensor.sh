@@ -12,7 +12,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 DRY_RUN=0
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+CREDENTIALS=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --credentials) CREDENTIALS=1 ;;
+    *) printf 'Unknown argument: %s\n' "$arg" >&2; exit 1 ;;
+  esac
+done
 
 COMPOSE_FILE="sensor/docker-compose.yml"
 ENV_FILE=".env"
@@ -25,6 +32,27 @@ command -v docker >/dev/null || die "docker not installed"
 docker compose version >/dev/null 2>&1 || die "docker compose plugin missing"
 command -v openssl >/dev/null || die "openssl not installed"
 [[ -f "$COMPOSE_FILE" ]] || die "$COMPOSE_FILE not found; run from the repo root"
+
+# File-based production deployment never creates or modifies .env.
+if (( CREDENTIALS )); then
+  for name in token salt; do
+    [[ -f "${HOME}/.config/sentinel/$name" ]] || die "missing credential file: ~/.config/sentinel/$name"
+  done
+  SENTINEL_IFACE="${SENTINEL_IFACE:-$(ip route show default | awk '{print $5; exit}')}"
+  export SENTINEL_IFACE
+  [[ -n "$SENTINEL_IFACE" ]] || die "could not detect the default interface"
+  ip link show "$SENTINEL_IFACE" >/dev/null 2>&1 || die "interface does not exist"
+  compose=(docker compose -f "$COMPOSE_FILE" -f sensor/compose.credentials.yml)
+  "${compose[@]}" config --quiet
+  if (( DRY_RUN )); then
+    log "credential deployment dry run ok; nothing started"
+    exit 0
+  fi
+  "${compose[@]}" build
+  "${compose[@]}" up -d
+  "${compose[@]}" ps
+  exit 0
+fi
 
 # Read KEY's value from .env without sourcing it.
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1; }

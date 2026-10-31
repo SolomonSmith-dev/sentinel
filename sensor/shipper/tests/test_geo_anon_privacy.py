@@ -89,6 +89,15 @@ def test_oui_missing_file(tmp_path):
 
 # --- privacy guard -------------------------------------------------------------
 
+@pytest.mark.parametrize("hostname", ["johns-macbook.local", "PRINTER.LAN", "nas.home.arpa"])
+def test_local_hostname_redacted(hostname):
+    text = f"ET INFO {hostname} contacted service"
+    assert privacy.violations(text) == ["hostname"]
+    redacted = privacy.redact(text)
+    assert hostname not in redacted
+    assert "[redacted]" in redacted
+    assert privacy.violations(redacted) == []
+
 CLEAN = {"sensor_id": "sensor-01", "sent_at": 1761370800, "queue_depth": 0,
          "devices": [{"device_hash": "dev-3fa91c", "vendor": "Apple Inc.", "first_seen": 1761370740}],
          "windows": [{"device_hash": "dev-3fa91c", "ts": 1761370740, "duration_s": 60, "bytes_in": 1,
