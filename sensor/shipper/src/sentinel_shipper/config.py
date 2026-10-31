@@ -43,8 +43,19 @@ class Settings:
                 return default
             return value.strip()
 
-        token = get("SENTINEL_TOKEN")
-        salt = get("SENTINEL_SALT")
+        def secret(name: str) -> str | None:
+            value, filename = get(name), get(name + "_FILE")
+            if value and filename:
+                raise ConfigError(f"set only one of {name} and {name}_FILE")
+            if filename:
+                try:
+                    return Path(filename).read_text(encoding="utf-8").strip() or None
+                except (OSError, UnicodeError):
+                    raise ConfigError(f"cannot read {name}_FILE") from None
+            return value
+
+        token = secret("SENTINEL_TOKEN")
+        salt = secret("SENTINEL_SALT")
         missing = [n for n, v in (("SENTINEL_TOKEN", token), ("SENTINEL_SALT", salt)) if not v]
         if missing:
             raise ConfigError(

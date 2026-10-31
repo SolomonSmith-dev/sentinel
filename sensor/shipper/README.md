@@ -52,6 +52,21 @@ eve.json (tail) ──┘   (dev-xxxxxx)     └─ feature store (sqlite)  ├�
 | `SENTINEL_RETRAIN_AT` | `03:30` (local time, `TZ`) |
 | `SENTINEL_ML` | `auto` (default), `on`, `off`; see below |
 
+## Mounted credentials
+
+For mounted credentials, use `SENTINEL_TOKEN_FILE` and `SENTINEL_SALT_FILE`
+instead of placing values in the container environment. Each file is read at
+startup; setting both a value and its `_FILE` counterpart is rejected. The
+production overlay `sensor/compose.credentials.yml` mounts the two credential
+files from `~/.config/sentinel/` read-only. Keep these files outside the checkout, readable only by the shipper UID (10001),
+with mode `0400` and an owner-only parent directory. Do not commit them or copy
+them into `.env`. Once provisioned, deploy or validate without reading `.env`:
+
+```sh
+./deploy-sensor.sh --credentials --dry-run
+./deploy-sensor.sh --credentials
+```
+
 ## SENTINEL_ML
 
 The sensor is a 2009 Mac Mini (Core 2 Duo P8600: SSE4.1, no SSE4.2, no POPCNT,
