@@ -49,6 +49,10 @@ if (alerts.length) {
       .join(", ")} ON CONFLICT(id) DO NOTHING;`,
   );
 }
+// Seed rows bypass ingest, so mark their hours for the cron to roll up (migration 0004).
+sql.push(
+  `INSERT INTO rollup_dirty (hour) SELECT DISTINCT (ts / 3600) * 3600 FROM windows WHERE is_seed = 1 AND ts >= ${start} ON CONFLICT(hour) DO NOTHING;`,
+);
 sql.push(
   `INSERT INTO seed_marker (id, last_ts, is_seed, received_at) VALUES (1, ${nowMin}, 1, ${now}) ON CONFLICT(id) DO UPDATE SET last_ts = MAX(seed_marker.last_ts, excluded.last_ts), received_at = excluded.received_at;`,
 );
