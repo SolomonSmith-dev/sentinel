@@ -60,6 +60,11 @@ describe("hourly rollup", () => {
   it("marks touched hours dirty on ingest and rebuilds only ended hours", async () => {
     const t = nowS();
     await load(t);
+    // load() stops at t - 60, so in the first five minutes of an hour it writes nothing into the
+    // current hour. Write one current-hour window explicitly so the assertion below never depends
+    // on the wall clock.
+    const cur = Math.floor(t / 3600) * 3600;
+    await env.DB.batch(buildRowStatements(env.DB, { devices: [], windows: [win(DEVS[0]!, cur, 0)], alerts: [], sensorId: "s1", isSeed: 0 }, t));
     const dirty = await env.DB.prepare("SELECT COUNT(*) AS n FROM rollup_dirty").first<{ n: number }>();
     expect(dirty!.n).toBeGreaterThanOrEqual(26);
     await rebuildRollups(env, t);
