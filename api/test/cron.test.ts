@@ -77,8 +77,9 @@ describe("seed top-up cron", () => {
     expect(r.windows).toBeGreaterThan(0);
   });
 
-  it("runs from the */5 scheduled handler", async () => {
-    const ctrl = createScheduledController({ scheduledTime: Date.now(), cron: "*/5 * * * *" });
+  it("runs from the */5 scheduled handler and refreshes row counts on the hour", async () => {
+    const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    const ctrl = createScheduledController({ scheduledTime: hour, cron: "*/5 * * * *" });
     await worker.scheduled(ctrl, env);
     expect(await n("SELECT COUNT(*) AS n FROM windows WHERE is_seed = 1")).toBeGreaterThan(0);
     const counts = await env.DB.prepare("SELECT devices, windows, alerts FROM row_counts WHERE id = 1").first();
@@ -87,6 +88,16 @@ describe("seed top-up cron", () => {
       windows: await n("SELECT COUNT(*) AS n FROM windows"),
       alerts: await n("SELECT COUNT(*) AS n FROM alerts"),
     });
+  });
+
+  it("leaves row counts alone on a mid-hour run", async () => {
+    const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    await worker.scheduled(createScheduledController({ scheduledTime: hour, cron: "*/5 * * * *" }), env);
+    const before = await env.DB.prepare("SELECT windows, updated_at FROM row_counts WHERE id = 1").first<{ windows: number; updated_at: number }>();
+    await worker.scheduled(createScheduledController({ scheduledTime: hour + 25 * 60_000, cron: "*/5 * * * *" }), env);
+    const after = await env.DB.prepare("SELECT windows, updated_at FROM row_counts WHERE id = 1").first<{ windows: number; updated_at: number }>();
+    expect(await n("SELECT COUNT(*) AS n FROM windows")).toBeGreaterThan(before!.windows);
+    expect(after).toEqual(before);
   });
 });
 

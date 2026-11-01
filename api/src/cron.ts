@@ -128,5 +128,7 @@ export async function scheduled(controller: ScheduledController, env: Env): Prom
     await seedTopUp(env, t);
     await rebuildRollups(env, t);
   }
-  await refreshRowCounts(env, t);
+  // COUNT(*) on windows reads every row (about 13k, 4M rows a day at every 5 minutes, measured
+  // 2026-11-01), so the row counts refresh on the daily prune and on the first run of each hour.
+  if (controller.cron === "17 3 * * *" || t % HOUR < 300) await refreshRowCounts(env, t);
 }
