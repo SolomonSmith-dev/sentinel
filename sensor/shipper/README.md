@@ -102,7 +102,7 @@ The configured ingest endpoint must use HTTPS, including local development. Plai
 
 The daily 04:15 server timer invokes `scripts/backup_coordinated.py` against a
 pinned shipper image. Under a shared lock, the shipper makes a consistent SQLite
-snapshot and captures its queue, quarantine and completed window files. Capture
+snapshot and captures its queue, quarantine, completed window files, opaque model bytes and EVE files from the saved checkpoint through a bounded cutoff. Capture
 releases the lock before compression and transfer; data is sent directly from
 memory into encrypted restic storage, never staged in plaintext. The exact
 snapshot is restored into memory and checked by SHA-256 and offline archive and
@@ -116,9 +116,7 @@ run. The first scheduled execution has not been observed.
 Queues may contain items already accepted by the time a snapshot is restored,
 and the API's deduplication and queue retention have bounded windows. Recovery
 validation never extracts or automatically sends queued telemetry: restore to
-isolated private storage and review replay explicitly. Suricata EVE offsets and
-logs and the ML model are not captured; alert continuity and model recovery are
-not established. The state includes sensitive local-network data.
+isolated private storage and review replay explicitly. The EVE checkpoint stores the original inode; an isolated recovery must remap it to the restored file inode while preserving the byte offset. Rotation/partial-line handling is tested synthetically, but live production replay is not verified. Model bytes are opaque and are never unpickled by validation; version compatibility must be checked before use. Events after a snapshot cutoff remain outside that snapshot. State and raw EVE include sensitive local-network data.
 
 `scripts/backup_state.py` remains a state-only fallback. Its earlier verified
 snapshot does not contain queue or windows and is not a full sensor restore.
