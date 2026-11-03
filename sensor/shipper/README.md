@@ -97,3 +97,22 @@ numpy is pinned to 2.3.x on purpose. numpy 2.4 wheels require x86-64-v2
 (SSE4.2), and the sensor host's Core 2 Duo does not have it.
 
 The configured ingest endpoint must use HTTPS, including local development. Plain HTTP, URL credentials, query strings and fragments are rejected before the shipper starts. This prevents accidentally sending the bearer token in cleartext.
+
+## Local state recovery
+
+`../shipper/scripts/backup_state.py` captures the running shipper's SQLite state
+using an online WAL-consistent snapshot entirely in memory. It sends the bytes
+to the private encrypted server restic repository and verifies a restored copy
+in memory against its SHA-256 and SQLite integrity. No state contents are logged
+or staged as plaintext. The server user timer at 04:15 uses the shared restic
+lock; `~/logs/sentinel-state-backup.json` records success or failure. A one-shot
+recovery check is not evidence that the next scheduled timer execution passed.
+
+This state-only copy does not capture pending queue files, raw windows, Suricata
+EVE continuity, or the ML model. It must not be represented as a consistent
+whole-sensor restore. State includes private local-network mappings and must
+remain encrypted at rest. Restore drills should use isolated, access-restricted
+storage and must not replay real telemetry into production.
+
+The `recovery_capture` module and shipper lock are a coordinated-capture
+implementation under development, not a deployed queue-recovery guarantee.

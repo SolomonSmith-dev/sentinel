@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up Sentinel SQLite state to encrypted storage
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/solomon/scripts/sentinel-state-backup.py
+RuntimeMaxSec=6h
