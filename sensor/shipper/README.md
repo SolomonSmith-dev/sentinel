@@ -98,21 +98,27 @@ numpy is pinned to 2.3.x on purpose. numpy 2.4 wheels require x86-64-v2
 
 The configured ingest endpoint must use HTTPS, including local development. Plain HTTP, URL credentials, query strings and fragments are rejected before the shipper starts. This prevents accidentally sending the bearer token in cleartext.
 
-## Local state recovery
+## Local recovery
 
-`../shipper/scripts/backup_state.py` captures the running shipper's SQLite state
-using an online WAL-consistent snapshot entirely in memory. It sends the bytes
-to the private encrypted server restic repository and verifies a restored copy
-in memory against its SHA-256 and SQLite integrity. No state contents are logged
-or staged as plaintext. The server user timer at 04:15 uses the shared restic
-lock; `~/logs/sentinel-state-backup.json` records success or failure. A one-shot
-recovery check is not evidence that the next scheduled timer execution passed.
+The daily 04:15 server timer invokes `scripts/backup_coordinated.py` against a
+pinned shipper image. Under a shared lock, the shipper makes a consistent SQLite
+snapshot and captures its queue, quarantine and completed window files. Capture
+releases the lock before compression and transfer; data is sent directly from
+memory into encrypted restic storage, never staged in plaintext. The exact
+snapshot is restored into memory and checked by SHA-256 and offline archive and
+SQLite validation. The result is `~/logs/sentinel-coordinated-backup.json`.
 
-This state-only copy does not capture pending queue files, raw windows, Suricata
-EVE continuity, or the ML model. It must not be represented as a consistent
-whole-sensor restore. State includes private local-network mappings and must
-remain encrypted at rest. Restore drills should use isolated, access-restricted
-storage and must not replay real telemetry into production.
+The shipper checks a process-specific lock-protocol handshake, and the backup
+fails if the running image differs from the approved digest. After any shipper
+image upgrade, review and update the service digest before expecting backups to
+run. The first scheduled execution has not been observed.
 
-The `recovery_capture` module and shipper lock are a coordinated-capture
-implementation under development, not a deployed queue-recovery guarantee.
+Queues may contain items already accepted by the time a snapshot is restored,
+and the API's deduplication and queue retention have bounded windows. Recovery
+validation never extracts or automatically sends queued telemetry: restore to
+isolated private storage and review replay explicitly. Suricata EVE offsets and
+logs and the ML model are not captured; alert continuity and model recovery are
+not established. The state includes sensitive local-network data.
+
+`scripts/backup_state.py` remains a state-only fallback. Its earlier verified
+snapshot does not contain queue or windows and is not a full sensor restore.
