@@ -10,9 +10,34 @@
 ![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers%20%2B%20D1-F38020?logo=cloudflare&logoColor=white)
 
-**Live dashboard: https://sentinel.solomonsmith.dev**
+Solo project, in production on my home server since October 2026. The dashboard at `sentinel.solomonsmith.dev` is private (Cloudflare Access, owner email login, JWT re-checked inside the Worker), so the screenshot below is from the local synthetic-data preview.
 
-The home sensor reports live pseudonymized telemetry. Cloudflare Access restricts the dashboard to the owner’s email login; the Worker also validates the signed session before returning data. Earlier synthetic demo history remains visible and labeled during the transition. Monitor only. No payloads are stored, and IP addresses and MAC addresses stay on the sensor; common local DNS names are rejected or redacted before shipping.
+**What makes it hard**
+
+- Real packets, not a toy feed. The sensor parses Ethernet/VLAN/QinQ, IPv4/IPv6 with extension headers, TCP and UDP through a bounds-checked cursor, in 10 s per-host windows with hard memory caps, so a spoofed-MAC flood cannot grow memory.
+- Anomaly scoring with no labels. A home LAN has no ground truth, so an isolation forest scores each window and its raw output is recalibrated to [0, 1] on every nightly retrain so the 0.8 alert threshold keeps its meaning.
+- Privacy enforced twice. The shipper refuses any batch containing an IP or MAC; the Worker independently rejects the same (`400 pii_rejected`) on both the raw body and the decoded JSON. MACs and IPs never leave the sensor.
+- Free-tier budgets as a design constraint. D1 counts every index entry as a write against 100k/day, so the pipeline ships 60 s rollups, skips idle devices and keeps one secondary index.
+
+**Evidence** (all three suites run locally on 2026-11-03; CI runs them on every push to `main`)
+
+| Suite | Command | Observed |
+|---|---|---|
+| API, vitest on the Workers runtime | `cd api && npm ci && npm test` | 119 passed, 5 files |
+| Shipper, pytest | `cd sensor/shipper && pip install -e '.[dev]' && pytest -q tests ../suricata/test_retention.py` | 197 passed (194 shipper + 3 Suricata retention) |
+| Capture, ctest | `cmake -S sensor/capture -B build && cmake --build build -j && ctest --test-dir build` | 4 of 4: doctest unit suite plus exact-count replays of three pcap fixtures (port scan, SYN flood, benign) |
+
+The replay tests run the real `sentinel-capture` binary against deterministic fixtures in [`sensor/tests/fixtures/`](sensor/tests/fixtures/) and assert exact counts (for example 100 inbound SYNs across 100 distinct ports from one scanner), not thresholds. The parser is also tested at every truncation length of several frames.
+
+**Run it without hardware**
+
+```sh
+cmake -S sensor/capture -B build && cmake --build build -j
+./build/sentinel-capture --pcap sensor/tests/fixtures/port_scan.pcap --out /tmp/windows   # one ndjson window, 2 hosts, 200 packets
+(cd dashboard && npm ci && npm run build)                                                       # the Worker serves dashboard/dist
+cd api && npm ci && npm run migrate:local && npm run seed:local && npm run dev                 # Worker + D1 on localhost with 24 h of labeled seed data
+pip install -e sensor/shipper && python3 ml/train.py                                          # trains and evaluates the isolation forest on labeled synthetic traffic
+```
 
 ![Sentinel dashboard, desktop](docs/images/dashboard-desktop.png)
 
@@ -87,13 +112,13 @@ See `ml/README.md` for why an isolation forest (no labels exist on a home LAN), 
 
 | Suite | Command | What it proves |
 |---|---|---|
-| API (vitest on the Workers runtime) | `cd api && npm test` | Ingest auth, size caps, idempotency, PII rejection, read endpoints. 80 tests passed on 2026-10-25. |
-| Shipper (pytest) | `cd sensor/shipper && .venv/bin/pytest -q` | Rules, eve.json tail, anonymizer, privacy guard, rollup, queue, ML mode. 158 tests passed on 2026-10-25. |
-| Capture (ctest) | `ctest --test-dir build --output-on-failure` | Parser unit tests plus exact-value replays of three pcap fixtures. 4 of 4 passed on 2026-10-25. |
+| API (vitest on the Workers runtime) | `cd api && npm test` | Ingest auth, size caps, idempotency, PII rejection, Access JWT checks, read endpoints, rollups, cron. 119 passed on 2026-11-03. |
+| Shipper (pytest) | `cd sensor/shipper && pytest -q tests ../suricata/test_retention.py` | Rules, eve.json tail, anonymizer, privacy guard, rollup, queue, ML mode, Suricata log retention. 197 passed on 2026-11-03. |
+| Capture (ctest) | `ctest --test-dir build --output-on-failure` | Parser unit tests plus exact-value replays of three pcap fixtures. 4 of 4 passed on 2026-11-03. |
 | Dashboard | `cd dashboard && npm run build` | Production build, run in CI. |
 | Deploy script | `shellcheck deploy-sensor.sh` | Run in CI. |
 
-CI runs on every push to `main` (badge above). Build steps for the capture binary are in [`sensor/capture/README.md`](sensor/capture/README.md).
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all five plus a gitleaks secret scan on every push to `main` and every pull request (badge above). Build steps for the capture binary are in [`sensor/capture/README.md`](sensor/capture/README.md).
 
 ## Repository layout
 
