@@ -8,7 +8,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -18,7 +18,7 @@ jobs:
   api:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         if: hashFiles('api/package.json') != ''
         with:
@@ -31,7 +31,7 @@ jobs:
   dashboard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         if: hashFiles('dashboard/package.json') != ''
         with:
@@ -44,7 +44,7 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: build and replay pcaps
         if: hashFiles('sensor/capture/CMakeLists.txt') != ''
         run: |
@@ -56,7 +56,7 @@ jobs:
   shipper:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         if: hashFiles('sensor/shipper/pyproject.toml') != ''
         with:
@@ -69,7 +69,7 @@ jobs:
   deploy-script:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shellcheck
         if: hashFiles('deploy-sensor.sh') != ''
         run: shellcheck deploy-sensor.sh
