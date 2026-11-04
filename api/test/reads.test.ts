@@ -223,11 +223,15 @@ it("shares the alert database snapshot across distinct cursors and limits", asyn
 });
 
 it("rate limits public readers without writing rejection logs", async () => {
-  let res: Response | undefined;
-  for (let i = 0; i < 121; i++) res = await fetchWorker("/api/devices", { headers: { "cf-connecting-ip": "198.51.100.200" } });
-  expect(res!.status).toBe(429);
-  expect(res!.headers.get("retry-after")).toBe("60");
-  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ingest_log").first()).toEqual({ n: 0 });
+  let calls = 0;
+  const limiter = vi.spyOn(env.READ_LIMITER, "limit").mockImplementation(async () => ({ success: ++calls <= 120 }));
+  try {
+    let res: Response | undefined;
+    for (let i = 0; i < 121; i++) res = await fetchWorker("/api/devices", { headers: { "cf-connecting-ip": "198.51.100.200" } });
+    expect(res!.status).toBe(429);
+    expect(res!.headers.get("retry-after")).toBe("60");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ingest_log").first()).toEqual({ n: 0 });
+  } finally { limiter.mockRestore(); }
 });
 
 
