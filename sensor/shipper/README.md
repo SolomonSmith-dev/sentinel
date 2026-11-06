@@ -97,3 +97,26 @@ numpy is pinned to 2.3.x on purpose. numpy 2.4 wheels require x86-64-v2
 (SSE4.2), and the sensor host's Core 2 Duo does not have it.
 
 The configured ingest endpoint must use HTTPS, including local development. Plain HTTP, URL credentials, query strings and fragments are rejected before the shipper starts. This prevents accidentally sending the bearer token in cleartext.
+
+## Local recovery
+
+The daily 04:15 server timer invokes `scripts/backup_coordinated.py` against a
+pinned shipper image. Under a shared lock, the shipper makes a consistent SQLite
+snapshot and captures its queue, quarantine, completed window files, opaque model bytes and EVE files from the saved checkpoint through a bounded cutoff. Capture
+releases the lock before compression and transfer; data is sent directly from
+memory into encrypted restic storage, never staged in plaintext. The exact
+snapshot is restored into memory and checked by SHA-256 and offline archive and
+SQLite validation. The result is `~/logs/sentinel-coordinated-backup.json`.
+
+The shipper checks a process-specific lock-protocol handshake, and the backup
+fails if the running image differs from the approved digest. After any shipper
+image upgrade, review and update the service digest before expecting backups to
+run. The first scheduled execution has not been observed.
+
+Queues may contain items already accepted by the time a snapshot is restored,
+and the API's deduplication and queue retention have bounded windows. Recovery
+validation never extracts or automatically sends queued telemetry: restore to
+isolated private storage and review replay explicitly. The EVE checkpoint stores the original inode; an isolated recovery must remap it to the restored file inode while preserving the byte offset. Rotation/partial-line handling is tested synthetically, but live production replay is not verified. Model bytes are opaque and are never unpickled by validation; version compatibility must be checked before use. Events after a snapshot cutoff remain outside that snapshot. State and raw EVE include sensitive local-network data.
+
+`scripts/backup_state.py` remains a state-only fallback. Its earlier verified
+snapshot does not contain queue or windows and is not a full sensor restore.

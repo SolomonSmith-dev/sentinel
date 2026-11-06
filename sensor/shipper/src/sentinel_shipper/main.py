@@ -18,6 +18,7 @@ from .mlcore import Scorer
 from .mlmode import ml_enabled
 from .pipeline import Pipeline
 from .queue import DiskQueue
+from .recovery_lock import recovery_lock, write_handshake
 from .sender import Sender
 from .state import State
 from .training import Trainer
@@ -37,8 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     log.info("sentinel-shipper %s starting: %r", __version__, settings)  # repr hides token/salt/wan ip
 
     settings.state_dir.mkdir(parents=True, exist_ok=True)
-    state = State(settings.state_dir / "state.db")
-    queue = DiskQueue(settings.state_dir)
+    with recovery_lock(settings.state_dir):
+        state = State(settings.state_dir / "state.db")
+        queue = DiskQueue(settings.state_dir)
+        write_handshake(settings.state_dir)
     geo = GeoDb.load(settings.geo_db)
     oui = anonymize.OuiDb.load(settings.oui_db)
     log.info("geo ranges: %d, OUI prefixes: %d, queued batches: %d", len(geo), len(oui), len(queue))
@@ -77,12 +80,13 @@ def main(argv: list[str] | None = None) -> int:
         while not stop.is_set():
             started = time.monotonic()
             try:
-                trainer.maybe_train()
-                res = pipeline.tick()
-                if res.files or res.alerts:
-                    log.info("tick: %d files, %d host windows -> %d windows, %d alerts, %d batch(es)",
-                             res.files, res.host_windows, res.windows, res.alerts, res.batches)
-                sender.drain()
+                with recovery_lock(settings.state_dir):
+                    trainer.maybe_train()
+                    res = pipeline.tick()
+                    if res.files or res.alerts:
+                        log.info("tick: %d files, %d host windows -> %d windows, %d alerts, %d batch(es)",
+                                 res.files, res.host_windows, res.windows, res.alerts, res.batches)
+                    sender.drain()
             except Exception:
                 log.exception("tick failed; will retry next interval")
             if once:

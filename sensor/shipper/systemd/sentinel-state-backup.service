@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up Sentinel SQLite state to encrypted storage
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/solomon/scripts/sentinel-coordinated-backup.py sha256:1c566a273e30782514f1e6dc9359d83b511de5cdc1f7958ebd510167a1238c0d
+RuntimeMaxSec=6h
