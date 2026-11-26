@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   secrets:
     runs-on: ubuntu-latest
@@ -19,12 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: require api/package.json
+        run: test -f api/package.json
       - uses: actions/setup-node@v4
-        if: hashFiles('api/package.json') != ''
         with:
           node-version: 22
       - name: test
-        if: hashFiles('api/package.json') != ''
         working-directory: api
         run: npm ci && npm run typecheck && npm test
 
@@ -32,12 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: require dashboard/package.json
+        run: test -f dashboard/package.json
       - uses: actions/setup-node@v4
-        if: hashFiles('dashboard/package.json') != ''
         with:
           node-version: 22
       - name: build
-        if: hashFiles('dashboard/package.json') != ''
         working-directory: dashboard
         run: npm ci && npm run build
 
@@ -45,8 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: require sensor/capture/CMakeLists.txt
+        run: test -f sensor/capture/CMakeLists.txt
       - name: build and replay pcaps
-        if: hashFiles('sensor/capture/CMakeLists.txt') != ''
         run: |
           sudo apt-get update && sudo apt-get install -y libpcap-dev cmake
           cmake -S sensor/capture -B build -DCMAKE_BUILD_TYPE=Release
@@ -57,12 +61,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: require sensor/shipper/pyproject.toml
+        run: test -f sensor/shipper/pyproject.toml
       - uses: actions/setup-python@v5
-        if: hashFiles('sensor/shipper/pyproject.toml') != ''
         with:
           python-version: "3.12"
       - name: test
-        if: hashFiles('sensor/shipper/pyproject.toml') != ''
         working-directory: sensor/shipper
         run: pip install -e '.[dev]' && pytest -q tests ../suricata/test_retention.py
 
@@ -70,6 +74,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: require deploy-sensor.sh
+        run: test -f deploy-sensor.sh
       - name: shellcheck
-        if: hashFiles('deploy-sensor.sh') != ''
         run: shellcheck deploy-sensor.sh
+
+  ci-gate:
+    name: ci-gate
+    needs: [secrets, api, dashboard, capture, shipper, deploy-script]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results=$RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "* | *" skipped "*)
+              echo "One or more jobs failed, were cancelled, or were skipped"
+              exit 1
+              ;;
+          esac
